@@ -11,10 +11,16 @@ both on alike.
 """
 from __future__ import annotations
 
+import os
+
 from PIL import Image, ImageDraw, ImageFont
 
-from .constants import FPS
-from .encoders import compress_args
+from .. import stream_media
+from ..store import Store
+from . import procs
+from .constants import DEFAULT_RESOLUTION, FPS, RESOLUTIONS
+from .encoders import compress_args, encoder
+from .fonts import font_file
 from .lettering import draw_centred
 
 # where things go, as parts of the picture (the page's preview draws it the same way)
@@ -64,3 +70,24 @@ def command(ffmpeg: str, png: str, enc: str, kbps: int) -> list[str]:
             "-f", "s16le", "-ar", "44100", "-ac", "2", "-i", "pipe:0",
             "-map", "0:v", "-map", "1:a",
             *compress_args(enc, kbps), "-f", "mpegts", "pipe:1"]
+
+
+def start(db: Store, chosen: dict, ffmpeg: str, folder: str):
+    """The holding screen drawn in `folder` at the stream's size and its ffmpeg started (MPEG-TS on its stdout, the music
+    fed to its stdin): the ffmpeg, or None when it couldn't be (said in the log; the stream goes live without it)."""
+    width, height, kbps = RESOLUTIONS.get(chosen["resolution"], RESOLUTIONS[DEFAULT_RESOLUTION])
+    mine = chosen["holding"]
+    colours = look(mine, chosen)
+    picture = None
+    if mine.get("image"):
+        try:
+            picture = str(stream_media.picture_path(db, None, mine["image"]))
+        except (ValueError, OSError, LookupError):
+            picture = None  # (gone from the stream folder: the words alone)
+    try:
+        png = os.path.join(folder, "holding.png")
+        draw(png, width, height, mine["text"], colours["background"], colours["color"], font_file(colours["font"]), picture)
+        return procs.popen(command(ffmpeg, png, encoder(ffmpeg), kbps), feed=True, out=True)
+    except (OSError, ValueError, TypeError) as e:
+        print(f"stream: the holding screen couldn't be shown ({e}); going live without it", flush=True)
+        return None
