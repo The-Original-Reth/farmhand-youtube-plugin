@@ -9,9 +9,19 @@ machine). Use your own.
 ## 1. Prepare the machine
 
 Install **Docker** and **git** (Docker builds the plugin straight from GitHub). Nothing else: the plugin connects to
-the NAS itself, once you give it the address in Farmhand (section 6).
+the NAS itself once you give it the address in Farmhand (section 6), so no shares need mounting on the machine.
 
-## 2. Get the compose file and edit it
+**On a Proxmox container (LXC)**, it must be allowed to mount network shares, as Farmhand's own container is. On the
+Proxmox host, in `/etc/pve/lxc/<id>.conf`:
+
+```
+features: nesting=1,mount=cifs;nfs
+lxc.apparmor.profile: unconfined
+```
+
+then restart the container. (A virtual machine or an ordinary computer needs nothing more.)
+
+## 2. Get the compose file
 
 ```bash
 sudo mkdir -p /opt/farmhand-stream && cd /opt/farmhand-stream
@@ -21,12 +31,15 @@ sudo mkdir -p /opt/farmhand-stream && cd /opt/farmhand-stream
 sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/docker-compose.yml
 ```
 
+It's ready as it is. It already gives the plugin's container what it needs to connect to the NAS itself
+(`cap_add: SYS_ADMIN, DAC_READ_SEARCH` and `security_opt: apparmor:unconfined`, as Farmhand's own container has).
+
+Only for an **NVIDIA card**, edit it and uncomment the `devices:` and library lines (driver set-up: the
+[README](README.md#an-nvidia-card), "An NVIDIA card"):
+
 ```bash
 sudo nano /opt/farmhand-stream/docker-compose.yml
 ```
-
-- Optional, for an NVIDIA card: uncomment the `devices:` and library lines (driver set-up: the
-  [README](README.md#an-nvidia-card), "An NVIDIA card").
 
 ## 3. Start it
 
@@ -76,17 +89,26 @@ and restart as above.
 
 ## 6. Set it up
 
-**YouTube** is now in Farmhand's menu, after Monitor. There: sign in to YouTube (**YouTube settings**) or paste a stream
-key, choose the grid and cameras, and press **Go live**.
+**1. Where it saves.** In Farmhand, open **Settings**. Under the **YouTube Stream** heading:
 
-**Where it saves:** on Farmhand's **Settings** page, under **YouTube Stream**, type the save location on your NAS as
-`\\192.168.10.240\3d_Printing_Elves\Farmhand` with its username and password, and press **Use this location**. The
-plugin connects to it and makes a `stream` folder (its pictures, slideshows and music) and a `YouTube clips` folder
-inside it; **Change…** beside either puts it in another folder of the save location. The password is kept by the
-plugin and never shown again. (Until then it uses the folders its container was given, `./media` and `./clips`
-beside the compose file.)
+1. **NAS address:** the save location on your NAS, written as Windows writes it, e.g.
+   `\\192.168.10.240\3d_Printing_Elves\Farmhand` (`//192.168.10.240/3d_Printing_Elves/Farmhand` works too).
+2. **Username** and **Password** for the share (username blank for guest access).
+3. Press **Use this location**. It says **connected**, or why it couldn't (a wrong password, a NAS it can't reach…).
 
-**Clips:** type a length (1 second to 5 minutes) on the YouTube page and press **Save clip**.
+The plugin makes two folders inside it, listed below the box as people reach them on the network:
+
+- **Stream folder** `…\Farmhand\stream`: the stream's pictures, slideshows and music.
+- **YouTube clips** `…\Farmhand\YouTube clips`: where **Save clip** puts its videos.
+
+**Change…** beside either one puts it in another folder of the save location (go into folders, make a new one, **Use
+this folder**). The password is kept by the plugin and never shown again. Until a save location is set, the plugin
+uses `./media` and `./clips` beside its compose file.
+
+**2. Going live.** **YouTube** is now in Farmhand's menu, after Monitor. There: sign in to YouTube (**YouTube
+settings**) or paste a stream key, choose the grid and cameras, and press **Go live**.
+
+**3. Clips.** On the YouTube page, type a length (1 second to 5 minutes) and press **Save clip**.
 
 ## Updating
 
@@ -95,3 +117,33 @@ cd /opt/farmhand-stream && sudo docker compose up -d --build
 ```
 
 The broadcast stays live: YouTube shows the holding screen for about a minute while the delay fills again.
+
+### A machine set up before the plugin had its own save location
+
+Its compose file came from GitHub when it was installed and isn't fetched again on update, so add the permissions to
+it once. Open it:
+
+```bash
+sudo nano /opt/farmhand-stream/docker-compose.yml
+```
+
+and under `restart: unless-stopped` add (two spaces more than `stream:`, like the lines around it):
+
+```yaml
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+```
+
+Then update as above, and set **Where it saves** on Farmhand's Settings page (section 6). Its old folders (e.g.
+`/mnt/stream:/media`) are only used until then: once the save location is connected, the `/etc/fstab` lines that
+mounted them and their `volumes:` lines can go, or stay as they are.
+
+## If it won't connect to the NAS
+
+- **"The plugin's container isn't allowed to mount network shares"**: the compose file is missing the `cap_add` and
+  `security_opt` lines (see just above), or, on Proxmox, the container's `features` and AppArmor lines (section 1).
+- **"The NAS refused the connection"**: check the username and password, and that the user may use that share.
+- **"Couldn't reach …"**: check the address, that the NAS is on, and that the plugin's machine is on the same network.

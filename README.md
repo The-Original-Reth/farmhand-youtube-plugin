@@ -114,8 +114,9 @@ sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Origin
 sudo docker compose up -d --build
 ```
 
-Change `./media` in it to the stream folder (see above) first. Built from a copy of the repository instead
-(`docker build -t farmhand-stream .`), remove its `build:` line.
+Then set where it saves on Farmhand's Settings page (see [Where it saves](#where-it-saves)); a machine set up before
+the plugin had its own save location adds the mount permissions to its compose file first (INSTALL.md, "Updating").
+Built from a copy of the repository instead (`docker build -t farmhand-stream .`), remove its `build:` line.
 
 **Moving from Farmhand's repository:** a machine set up from Farmhand's copy (`#main:plugins/stream` on its `build:`
 line) changes that line to `https://github.com/The-Original-Reth/farmhand-youtube-plugin.git#main` and runs
