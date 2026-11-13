@@ -1,4 +1,7 @@
-# YouTube Stream: the live stream to YouTube as a Farmhand plugin
+# FarmHand - YouTube Plugin
+
+The live stream to YouTube as a plugin for [Farmhand](https://github.com/The-Original-Reth/farmhand), in its own repository
+and its own Docker container, talking to Farmhand only through Farmhand's plugin API.
 
 The YouTube Stream plugin (id `stream`) sends printers' cameras live to **YouTube Live**, no OBS needed, from a container of its own, so a
 Farmhand update, restart or crash never stops the stream. It is the only way Farmhand streams: Farmhand's own Stream
@@ -47,10 +50,11 @@ What it adds over the Stream page older Farmhands had built in:
 
 ## Build it
 
-On the machine that will run it (Docker installed), from a copy of Farmhand's repository:
+On the machine that will run it (Docker installed), from a copy of this repository:
 
 ```bash
-docker build -t farmhand-stream plugins/stream
+git clone https://github.com/The-Original-Reth/farmhand-youtube-plugin.git && cd farmhand-youtube-plugin
+docker build -t farmhand-stream .
 ```
 
 ## The stream folder
@@ -75,17 +79,20 @@ It runs on Farmhand's machine or any other machine on the farm's network that re
 cameras. [`docker-compose.yml`](docker-compose.yml) here is ready to use: it builds the plugin straight from this repository
 on GitHub (git must be installed), restarts it by itself, keeps its settings in a volume and reads `stream.env` once
 Farmhand gives the token. Farmhand's Plugins page shows the same file and these steps under **Run a plugin in its own
-container**, with Stream chosen (a copy in `frontend/src/plugins/compose/stream.yml`; `tests/test_compose.py` checks the
-two match).
+container**, with Stream chosen (a copy in Farmhand's `frontend/src/plugins/compose/stream.yml`: change the two together).
 
 ```bash
 sudo mkdir -p /opt/farmhand-stream && cd /opt/farmhand-stream
-sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Original-Reth/farmhand/main/plugins/stream/docker-compose.yml
+sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/docker-compose.yml
 sudo docker compose up -d --build
 ```
 
 Change `./media` in it to the stream folder (see above) first. Built from a copy of the repository instead
-(`docker build -t farmhand-stream plugins/stream`), remove its `build:` line.
+(`docker build -t farmhand-stream .`), remove its `build:` line.
+
+**Moving from Farmhand's repository:** a machine set up from Farmhand's copy (`#main:plugins/stream` on its `build:`
+line) changes that line to `https://github.com/The-Original-Reth/farmhand-youtube-plugin.git#main` and runs
+`sudo docker compose up -d --build`. Its settings stay in the `stream-data` volume.
 
 ### An NVIDIA card
 
@@ -181,11 +188,11 @@ save a few seconds with `ffmpeg -i rtsp://192.168.10.215:8554/live/farmtest -t 1
 ## Developing
 
 ```bash
-cd plugins/stream && pip install -r requirements-dev.txt && python -m pytest -q
-cd plugins/stream/page && npm install && npm run build     # the page, into streamer/web
+pip install -r requirements-dev.txt && python -m pytest -q
+cd page && npm install && npm run build                      # the page, into streamer/web
 STREAM_DATA=./data STREAM_FOLDER=./media python -m streamer  # the plugin on :8080 (ffmpeg on the PATH to go live)
-cd plugins/stream/page && npm run dev                      # the page on :3638, its API passed to :8080
+cd page && npm run dev                                       # the page on :3638, its API passed to :8080
 ```
 
-Much of the code began as Farmhand's own Stream page, copied (the first commit adding this folder copies it unchanged).
-That page is gone from Farmhand now, so this folder is the only copy.
+Much of the code began as Farmhand's own Stream page, copied (the first commit here copies it unchanged). It was then
+developed in Farmhand's repository under `plugins/stream` (its history came along), and lives here from now on.

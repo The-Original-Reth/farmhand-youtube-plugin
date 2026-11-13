@@ -54,7 +54,7 @@ def health():
 def index():
     page = WEB / "index.html"
     if not page.is_file():
-        return PlainTextResponse("The Stream plugin's page isn't built: run npm run build in plugins/stream/page.", status_code=503)
+        return PlainTextResponse("The Stream plugin's page isn't built: run npm run build in page/.", status_code=503)
     return FileResponse(page, headers={"Cache-Control": "no-cache"})
 
 

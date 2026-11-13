@@ -1,3 +1,9 @@
-page/node_modules/
-
+**/__pycache__/
+**/node_modules/
+.pytest_cache/
+# the page, built by npm run build in page/ (the Docker image builds it itself)
 streamer/web/
+# trying it out locally (README: Developing)
+data/
+media/
+stream.env

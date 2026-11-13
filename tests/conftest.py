@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so "import streamer" works from plugins/stream
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so "import streamer" works from the repository's folder
 
 from streamer import config, store  # noqa: E402
 
