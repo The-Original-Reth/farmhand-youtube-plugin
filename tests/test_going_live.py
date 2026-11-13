@@ -164,3 +164,29 @@ def test_the_plugin_shutting_down_leaves_the_youtube_broadcast_live():
     stream._broadcast = Fake("stopped")
     stream.stop()
     assert ended == ["stopped"]
+
+
+def test_the_volume_slider_is_heard_on_youtube_straight_away_without_being_saved(api, ffmpeg, farmhand, monkeypatch):
+    """Moving the volume slider while live changes the music going out at once, not saved; leaving the page (or a page
+    that stops saying so) puts the saved volume back."""
+    monkeypatch.setattr(runner, "TRYING_FOR", 0.3)
+    grid(api, [{"camera": "1:Bed"}, {"camera": "2:Camera"}])
+    assert api.put("/api/stream", json={"music_volume": 30}).status_code == 200
+    assert api.post("/api/stream/start").status_code == 200
+    assert wait_until(lambda: runner.stream._player is not None)
+    player = runner.stream._player
+
+    assert api.post("/api/stream/music-volume", json={"volume": 80}).status_code == 200
+    assert player.volume == 80 and api.get("/api/stream").json()["settings"]["music_volume"] == 30  # (not saved)
+    assert api.post("/api/stream/music-volume", json={"volume": None}).status_code == 200
+    assert player.volume == 30  # the page left: the saved volume
+
+    api.post("/api/stream/music-volume", json={"volume": 70})
+    assert player.volume == 70
+    assert wait_until(lambda: player.volume == 30, timeout=3)  # not said again: back to the saved volume by itself
+
+    api.post("/api/stream/music-volume", json={"volume": 60})
+    assert api.put("/api/stream", json={"music_volume": 60}).status_code == 200  # saved: it stays
+    assert player.volume == 60
+    assert api.post("/api/stream/music-volume", json={"volume": 101}).status_code == 422
+    api.post("/api/stream/stop")

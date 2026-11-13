@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from . import live_stream, storage, stream_media, youtube_live
@@ -226,6 +227,19 @@ def delete_slideshow_picture(name: str, picture: str, confirm: bool = Query(Fals
 
 # ------------------------------------------------------------------ the music: MP3s in the stream folder's music/
 # Tracks added while live join the music's next round; it isn't stopped for them.
+
+
+class TryVolumeIn(BaseModel):
+    volume: int | None = Field(None, ge=0, le=100)  # None: back to the saved volume
+
+
+@router.post("/music-volume")
+def try_music_volume(payload: TryVolumeIn):
+    """The volume slider moved on the page: the music going out follows it straight away, without saving it. The page
+    says it again every few seconds while it stays, and sends {volume: null} when it's left (or the change undone); a
+    volume not said again for 20 seconds goes back to the saved one by itself. (Not live: nothing to do.)"""
+    live_stream.stream.try_volume(payload.volume)
+    return {"volume": payload.volume}
 
 
 @router.post("/music/{action}")

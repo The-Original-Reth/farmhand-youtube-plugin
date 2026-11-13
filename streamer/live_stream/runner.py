@@ -36,6 +36,7 @@ from .picture import sender_command
 
 LIVE_KEY = "live_wanted"  # in the plugin's store while the stream is meant to be live: it goes live again after a restart
 RESUME_EVERY = 30  # seconds between tries at going live again after a restart, while it can't yet
+TRYING_FOR = 20  # seconds a volume tried on the page (try_volume) lasts without the page saying it again
 
 
 class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
@@ -65,6 +66,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         self._picture = 0  # one per layout while live (a hand-over moves it on)
         self._title: dict | None = None  # setting the YouTube title: {state: "waiting" | "done" | "failed", message}
         self._player: music.Player | None = None  # the music, while live
+        self._trying: tuple[int, float] | None = None  # a volume being tried on the page, not saved: (volume, until when)
         self._warming = None  # a new layout's picture ffmpeg, warming up beside the one going out
         self._changing = False  # a new layout is on its way (settling, or warming up)
         self._cache: str | None = None  # slideshow screens put together this time live, reused by later layouts
@@ -128,11 +130,40 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         return True
 
     def music_settings(self, chosen: dict) -> None:
-        """The music's choices changed while live: the music follows straight away, no new ffmpeg."""
+        """The music's choices changed while live: the music follows straight away, no new ffmpeg. (A volume being tried
+        on the page gives way to the one saved.)"""
         with self._lock:
             player = self._player
+            self._trying = None
         if player:
             player.settings(on=chosen["music"], shuffle=chosen["music_shuffle"], volume=chosen["music_volume"])
+
+    def try_volume(self, volume: int | None) -> None:
+        """The volume slider moved on the page, not saved: the music going out follows it straight away. None: back to
+        the saved volume (the page is left, or its change undone). The page says it again every few seconds while it
+        stays; a tried volume not said again for TRYING_FOR seconds (the page closed without a word) goes back to the
+        saved one by itself. Nothing is saved either way."""
+        with self._lock:
+            player = self._player
+            self._trying = None if volume is None else (max(0, min(100, int(volume))), time.monotonic() + TRYING_FOR)
+            trying = self._trying
+        if not player:
+            return
+        if trying is None:
+            player.settings(on=player.on, shuffle=player.shuffle, volume=settings(store())["music_volume"])
+            return
+        player.settings(on=player.on, shuffle=player.shuffle, volume=trying[0])
+        threading.Timer(TRYING_FOR + 0.5, self._tried_long_enough).start()
+
+    def _tried_long_enough(self) -> None:
+        """A tried volume the page stopped saying goes back to the saved one."""
+        with self._lock:
+            if self._trying is None or time.monotonic() < self._trying[1]:
+                return
+            self._trying = None
+            player = self._player
+        if player:
+            player.settings(on=player.on, shuffle=player.shuffle, volume=settings(store())["music_volume"])
 
     def music_control(self, action: str) -> None:
         """"play", "pause", "next" or "back" on the music going out. ValueError when there's none to control."""
