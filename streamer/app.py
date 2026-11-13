@@ -1,7 +1,7 @@
 """
 The Stream plugin's web server: its page (shown inside Farmhand at /plugins/stream/), the Stream page's API under
 /api/stream (routes.py), what else the page reads (page_routes.py), and what Farmhand asks of every plugin (/manifest,
-/health).
+/health), and clips (clip_routes.py: the last seconds of what went to YouTube, saved as MP4s).
 
 Besides the stream itself, the page reads only what the plugin hands it: the farm's printers and cameras (from
 Farmhand's /cameras, through the plugin), each printer's print, and a camera's latest picture for the preview (from
@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from . import farm, page_routes
+from . import clip_routes, farm, page_routes
 from .routes import router
 
 HERE = Path(__file__).resolve().parent
@@ -26,6 +26,7 @@ MANIFEST = Path("/farmhand-plugin.json") if Path("/farmhand-plugin.json").is_fil
 app = FastAPI(title="Farmhand Stream plugin", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(router)
 app.include_router(page_routes.router)
+app.include_router(clip_routes.router)
 
 
 def read_manifest() -> dict:
@@ -54,7 +55,7 @@ def health():
 def index():
     page = WEB / "index.html"
     if not page.is_file():
-        return PlainTextResponse("The Stream plugin's page isn't built: run npm run build in plugins/stream/page.", status_code=503)
+        return PlainTextResponse("The Stream plugin's page isn't built: run npm run build in page/.", status_code=503)
     return FileResponse(page, headers={"Cache-Control": "no-cache"})
 
 

@@ -38,6 +38,7 @@ class Buffer:
         self._first: float | None = None
         self._ended = False
         self._filler = None  # while filling: what the sender is given meanwhile (the holding screen's ffmpeg), or None
+        self.sent = None  # told each piece the sender has taken (what YouTube is given: kept for clips, clips.py), or None
         threading.Thread(target=self._feed, name="stream-buffer", daemon=True).start()
 
     def fill_from(self, proc) -> None:
@@ -194,12 +195,14 @@ class Buffer:
         try:
             sink.write(data)
             sink.flush()
-            return True
         except (OSError, ValueError):
             with self._cond:
                 if self._sink is sink:
                     self._sink = None
             return False
+        if self.sent is not None:
+            self.sent(data)
+        return True
 
 
 def _stop(proc) -> None:

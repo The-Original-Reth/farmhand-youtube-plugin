@@ -3,3 +3,4 @@ uvicorn>=0.29
 httpx>=0.27
 pillow>=10
 python-multipart>=0.0.9
+tzdata>=2024.1   # time zones for clips' names (the slim Python image has none)

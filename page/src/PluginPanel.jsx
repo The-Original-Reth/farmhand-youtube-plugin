@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { c } from "./theme.js";
 import { cancelButton, panelBox, uiText } from "./styles.js";
 import { errorText, getMigration, migrateNow } from "./api.js";
+import { ClipsPanel } from "./ClipsPanel.jsx";
 
 // What the Stream plugin adds to the Stream page, under the live panel: where the stream goes while being tried out,
 // each camera live or down while live, when Farmhand isn't answering (the stream carries on without it), and bringing
@@ -44,6 +45,7 @@ export function PluginPanel({ page, farmhandError, onMigrated }) {
           heard of, and the words under them are just the printers' names until Farmhand is back.
         </div>
       )}
+      <ClipsPanel />
       <MigrateOffer onMigrated={onMigrated} />
     </>
   );

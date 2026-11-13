@@ -1,27 +1,19 @@
-"""The docker-compose file Farmhand's Plugins page shows for Stream (frontend/src/plugins/compose/stream.yml) is this plugin's own."""
+"""The docker-compose file builds this plugin from its own repository. Farmhand's Plugins page shows a copy of it
+(frontend/src/plugins/compose/stream.yml in Farmhand's repository): change both together."""
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 PLUGIN = Path(__file__).resolve().parent.parent
-SHOWN = PLUGIN.parent.parent / "frontend" / "src" / "plugins" / "compose" / "stream.yml"
 
 
-def test_compose_file_is_valid_and_builds_the_plugin():
+def test_compose_file_is_valid_and_builds_the_plugin_from_its_own_repository():
     data = yaml.safe_load((PLUGIN / "docker-compose.yml").read_text(encoding="utf-8"))
     stream = data["services"]["stream"]
-    assert stream["build"].endswith("#main:plugins/stream")
+    assert stream["build"] == "https://github.com/The-Original-Reth/farmhand-youtube-plugin.git#main"
     assert stream["ports"] == ["8080:8080"]
     assert stream["env_file"] == [{"path": "stream.env", "required": False}]
     assert "stream-data:/data" in stream["volumes"]
     assert "stream-data" in data["volumes"]
-
-
-@pytest.mark.skipif(not SHOWN.exists(), reason="Farmhand's frontend isn't beside the plugin")
-def test_plugins_page_shows_the_same_compose_file():
-    ours = (PLUGIN / "docker-compose.yml").read_text(encoding="utf-8").replace("\r\n", "\n")
-    shown = SHOWN.read_text(encoding="utf-8").replace("\r\n", "\n")
-    assert shown == ours, "copy plugins/stream/docker-compose.yml to frontend/src/plugins/compose/stream.yml"

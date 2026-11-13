@@ -1,4 +1,4 @@
-# The Stream plugin: build with  docker build -t farmhand-stream plugins/stream
+# The YouTube Stream plugin: build with  docker build -t farmhand-stream .
 # Its page is a small Vite build (page/), made in the first stage; the plugin itself is Python with ffmpeg and fonts.
 FROM node:22-alpine AS page
 WORKDIR /page

@@ -1,5 +1,5 @@
 """
-Talking to Farmhand's plugin API (docs/plugins.md in Farmhand's repository has every endpoint and answer).
+Talking to Farmhand's plugin API (docs/plugins.md in Farmhand's repository, github.com/The-Original-Reth/farmhand, has every endpoint and answer).
 
 Every call sends the plugin's token as "Authorization: Bearer <FARMHAND_TOKEN>". Whatever goes wrong becomes a
 FarmhandError whose message is plain words for the operator, shown on the plugin's page as it is:
