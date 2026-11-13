@@ -47,7 +47,9 @@ export { post };
 const normalizeClips = (r) => ({ ...r, folder: { path: r.folder.path, shownAs: r.folder.shown_as, problem: r.folder.problem } });
 export const getClips = async () => normalizeClips(await request("/clips"));
 export const setClipLength = async (seconds) => normalizeClips(await request("/clips", jsonBody("PUT", { seconds })));
-export const takeClip = (tz) => request("/clips", jsonBody("POST", { tz: tz || null }));
+// source: "stream" (the last stretch of what went to YouTube: { name, seconds, size }) or a camera, "printer id:camera
+// name" (the next stretch from it, recorded in the background: { recording: { source, label, seconds, started, until } })
+export const takeClip = (tz, source = "stream") => request("/clips", jsonBody("POST", { tz: tz || null, source }));
 export const clipUrl = (name) => `${API_BASE}/clips/${encodeURIComponent(name)}`;
 
 // Where the plugin saves: a save location on the NAS (\server\share\folder and its login) that the plugin mounts itself,

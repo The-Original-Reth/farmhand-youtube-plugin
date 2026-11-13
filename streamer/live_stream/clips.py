@@ -32,7 +32,10 @@ EXTRA = 10  # seconds kept beyond MOST_SECONDS, so the longest clip can still st
 CLIP_KEY = "clip_seconds"
 SHOWN = 10  # the newest clips the page lists
 SAVE_TIMEOUT = 120  # seconds ffmpeg may take to copy a clip into an MP4 (five minutes of stream, onto a NAS share)
-NAME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}-[0-9]{2}-[0-9]{2}( [0-9]+)? \([0-9]+ s\)\.mp4$")
+NAME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}-[0-9]{2}-[0-9]{2}( [0-9]+)?( [^/\\]{1,80}?)? \([0-9]+ s\)\.mp4$")
+KEYFRAME_EVERY = 2  # seconds: how often a go2rtc camera (and the stream) sends a whole picture
+STREAM = "stream"  # the source that is what goes to YouTube (the others: cameras, "printer id:camera name")
+UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f]+')  # (left out of a camera's name in a clip's name)
 
 
 class Recent:
@@ -177,9 +180,131 @@ def _zone(tz: str | None):
         return None
 
 
-def _free_name(folder: Path, stamp: str, seconds: int) -> str:
-    """"<date> <time> (<n> s).mp4", with a number added when one taken the same second is there already."""
-    name, n = f"{stamp} ({seconds} s).mp4", 2
+def _free_name(folder: Path, stamp: str, seconds: int, label: str | None = None) -> str:
+    """"<date> <time> (<n> s).mp4" (a camera's: "<date> <time> <camera> (<n> s).mp4"), with a number added when one
+    taken the same second is there already."""
+    what = f" {UNSAFE.sub('-', label).strip(' .-')[:80]}" if label else ""
+    name, n = f"{stamp}{what} ({seconds} s).mp4", 2
     while (folder / name).exists():
-        name, n = f"{stamp} {n} ({seconds} s).mp4", n + 1
+        name, n = f"{stamp} {n}{what} ({seconds} s).mp4", n + 1
     return name
+
+
+# ------------------------------------------------------------------ clips from a camera: the next N seconds
+
+
+def sources(farm: dict) -> list[dict]:
+    """What can be clipped: the stream first, then every camera Farmhand can see that can be read (`farm`: the cameras
+    as last heard, sources.known), as [{key, label}]."""
+    out = [{"key": STREAM, "label": "Stream"}]
+    for pid, printer in sorted(farm.items(), key=lambda kv: (kv[1].get("name") or "").lower()):
+        every = printer.get("cameras") or []
+        for cam in every:
+            if not cam.get("ffmpeg_input"):
+                continue
+            label = printer.get("name") or f"Printer {pid}"
+            out.append({"key": f"{pid}:{cam.get('name')}", "label": label if len(every) <= 1 else f"{label} · {cam.get('name')}"})
+    return out
+
+
+def camera_of(farm: dict, key: str) -> tuple[str, dict]:
+    """(its label, the camera as Farmhand gave it) for a source key; ValueError when it can't be clipped."""
+    pid, _, name = str(key).partition(":")
+    printer = farm.get(pid)
+    every = (printer or {}).get("cameras") or []
+    cam = next((c for c in every if c.get("name") == name), None)
+    if not printer or cam is None:
+        raise ValueError("That camera isn't one Farmhand lists any more.")
+    if not cam.get("ffmpeg_input"):
+        raise ValueError(cam.get("error") or f"{printer.get('name')}'s {name} camera can't be recorded.")
+    label = printer.get("name") or f"Printer {pid}"
+    return (label if len(every) <= 1 else f"{label} · {name}"), cam
+
+
+def camera_command(ffmpeg: str, cam: dict, seconds: int, out: str) -> list[str]:
+    """Recording a camera for `seconds` into an MP4: copied as it comes when it's H.264 over RTSP needing no turning
+    (go2rtc, a Buddy3D: no work, no loss); otherwise compressed (an MJPEG camera, or one Mainsail turns)."""
+    args, turn = list(cam["ffmpeg_input"]), list(cam.get("ffmpeg_filters") or [])
+    copy = cam.get("kind") == "rtsp" and not turn
+    if copy:
+        video = ["-c:v", "copy"]
+        # (a copy starts at the camera's first whole picture, up to KEYFRAME_EVERY seconds in: that much more is recorded,
+        # so the clip is never shorter than asked, as a clip of the stream can also be up to that much longer)
+        seconds = int(seconds) + KEYFRAME_EVERY
+    else:
+        video = [*(["-vf", ",".join(turn)] if turn else []), "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+    return [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", *args, "-t", str(int(seconds)), "-an", *video,
+            "-movflags", "+faststart", "-f", "mp4", out]
+
+
+class Recordings:
+    """Cameras being recorded now (one at a time per camera), and how the last few ended, for the page."""
+
+    KEPT = 5
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.now: dict[str, dict] = {}  # source key -> {source, label, seconds, started, until}
+        self.ended: collections.deque[dict] = collections.deque(maxlen=self.KEPT)  # {source, label, ok, text, name}
+
+    def state(self) -> dict:
+        with self._lock:
+            return {"recording": list(self.now.values()), "ended": list(self.ended)}
+
+    def start(self, key: str, label: str, seconds: int) -> dict:
+        with self._lock:
+            if key in self.now:
+                raise ValueError(f"{label} is being recorded already: that clip ends first.")
+            started = datetime.now().astimezone()
+            job = {"source": key, "label": label, "seconds": seconds, "started": started.isoformat(),
+                   "until": started.timestamp() + seconds}
+            self.now[key] = job
+            return dict(job)
+
+    def end(self, key: str, ok: bool, text: str, name: str | None = None) -> None:
+        with self._lock:
+            job = self.now.pop(key, None) or {"label": key}
+            self.ended.appendleft({"source": key, "label": job["label"], "ok": ok, "text": text, "name": name})
+
+
+recordings = Recordings()
+
+
+def record_camera(ffmpeg: str, folder: Path, key: str, label: str, cam: dict, seconds: int, tz: str | None = None,
+                  run=None) -> dict:
+    """The next `seconds` from a camera, recorded in the background into the clips folder as
+    "<date> <time> <camera> (<n> s).mp4" (written beside its name and renamed once whole). Answers the recording
+    ({source, label, seconds, started, until}) at once; how it ended is in recordings.state(). ValueError when it
+    can't start (no clips folder, that camera being recorded already)."""
+    run = run or subprocess.run
+    problem = folder_problem(folder)
+    if problem:
+        raise ValueError(problem)
+    seconds = clamp(int(seconds))
+    job = recordings.start(key, label, seconds)
+    when = datetime.now(_zone(tz))
+
+    def go() -> None:
+        name = _free_name(folder, f"{when:%Y-%m-%d %H-%M-%S}", seconds, label)
+        part = folder / f".{name}.part"
+        try:
+            done = run(camera_command(ffmpeg, cam, seconds, str(part)), capture_output=True, timeout=seconds + SAVE_TIMEOUT)
+            if done.returncode != 0 or not part.exists() or part.stat().st_size == 0:
+                said = (done.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+                raise ValueError(f"{label} couldn't be recorded ({said[-1] if said else 'ffmpeg gave nothing'}).")
+            os.replace(part, folder / name)
+            recordings.end(key, True, f"Saved “{name}”.", name)
+        except subprocess.TimeoutExpired:
+            recordings.end(key, False, f"Recording {label} took too long: is the camera answering?")
+        except ValueError as e:
+            recordings.end(key, False, str(e))
+        except OSError as e:
+            recordings.end(key, False, f"{label}'s clip couldn't be written ({e.strerror or e}).")
+        finally:
+            try:
+                part.unlink()
+            except OSError:
+                pass
+
+    threading.Thread(target=go, name=f"stream-clip {key}", daemon=True).start()
+    return job

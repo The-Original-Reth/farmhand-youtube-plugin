@@ -85,6 +85,15 @@ stream folder that page used, so the squares find their pictures.
 
 ## Clips
 
+The **Clip** drop-down on the page says what to clip: **Stream**, or any camera Farmhand can see (its printer's name).
+
+- **Stream:** **Save clip** saves the last stretch of what went to YouTube, at once (below).
+- **A camera:** **Record clip** records the next stretch from that camera, straight from it, in the background; the
+  page counts it down and says how it ended. A go2rtc or Buddy3D camera (H.264) is copied as it comes, with up to 2
+  seconds more so it's never short (it starts on the camera's first whole picture); an MJPEG camera, or one Mainsail
+  turns, is compressed. It's named for when it was taken and its camera: `2026-11-12 18-26-03 VT 1026 (30 s).mp4`.
+  One recording at a time per camera.
+
 **Save clip** on the page saves the last stretch of what went to YouTube as an MP4 in the clips folder. How long a clip
 is, from **1 second to 5 minutes** (3 seconds unless changed), is typed in beside it (kept by the plugin): seconds
 (`45`, `90 s`), minutes and seconds (`2:30`) or minutes (`3 min`). The plugin keeps the last

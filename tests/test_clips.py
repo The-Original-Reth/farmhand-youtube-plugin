@@ -192,3 +192,72 @@ def test_a_clip_is_3_seconds_unless_changed():
     assert clips.seconds_of({}) == 3
     assert clips.seconds_of({clips.CLIP_KEY: "120"}) == 120
     assert clips.seconds_of({clips.CLIP_KEY: "nonsense"}) == 3
+
+
+# ------------------------------------------------------------------ clips from a camera: the next N seconds
+
+
+def test_the_clip_sources_are_the_stream_then_every_camera_farmhand_can_see(api, plugin, farmhand):
+    from streamer import farm
+
+    farm.cameras(plugin)
+    from streamer.live_stream.sources import known
+
+    assert clips.sources(known(plugin)) == [
+        {"key": "stream", "label": "Stream"},
+        {"key": "2:Camera", "label": "Core One · Camera"},  # (the Nozzle only plays in a browser: not listed)
+        {"key": "1:Bed", "label": "VT 1190"},
+    ]
+
+
+def test_a_camera_is_recorded_for_the_next_seconds_copied_when_it_can_be():
+    rtsp = {"kind": "rtsp", "ffmpeg_input": ["-rtsp_transport", "tcp", "-i", "rtsp://10.0.6.33:8554/chamber"], "ffmpeg_filters": []}
+    args = clips.camera_command("ffmpeg", rtsp, 30, "out.part")
+    assert args[args.index("-t") + 1] == "32" and args[args.index("-c:v") + 1] == "copy" and "-an" in args  # (+2: see KEYFRAME_EVERY)
+    mjpeg = {"kind": "mjpeg", "ffmpeg_input": ["-f", "mpjpeg", "-i", "http://10.0.6.21/webcam/?action=stream"], "ffmpeg_filters": ["hflip"]}
+    args = clips.camera_command("ffmpeg", mjpeg, 5, "out.part")
+    assert args[args.index("-c:v") + 1] == "libx264" and args[args.index("-vf") + 1] == "hflip" and args[args.index("-t") + 1] == "5"
+
+
+def test_a_camera_clip_is_recorded_in_the_background_and_named_for_its_camera(clips_api, plugin, farmhand, monkeypatch):
+    from streamer import farm
+
+    api, folder = clips_api
+    farm.cameras(plugin)
+    page = api.get("/api/clips").json()
+    assert [s["key"] for s in page["sources"]] == ["stream", "2:Camera", "1:Bed"] and page["recording"] == []
+
+    ran = []
+
+    def slow_run(args, capture_output=True, timeout=None):
+        ran.append(args)
+        import time
+        time.sleep(0.3)  # (recording)
+        Path(args[-1]).write_bytes(b"....ftypisom")
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(clips.subprocess, "run", slow_run)
+    r = api.post("/api/clips", json={"source": "1:Bed", "seconds": 10, "tz": "America/New_York"})
+    assert r.status_code == 202 and r.json()["recording"]["label"] == "VT 1190"
+    assert api.get("/api/clips").json()["recording"][0]["source"] == "1:Bed"
+    assert api.post("/api/clips", json={"source": "1:Bed"}).status_code == 409  # (one at a time per camera)
+    assert wait_until(lambda: api.get("/api/clips").json()["recording"] == [], timeout=3)
+    ended = api.get("/api/clips").json()["ended"][0]
+    assert ended["ok"] and ended["name"].endswith(" VT 1190 (10 s).mp4") and clips.NAME.match(ended["name"])
+    assert ended["name"] in [c["name"] for c in api.get("/api/clips").json()["clips"]]
+    assert ran[0][ran[0].index("-t") + 1] == "10"
+
+    assert api.post("/api/clips", json={"source": "2:Nozzle"}).status_code == 422  # (can't be recorded)
+    assert api.post("/api/clips", json={"source": "9:Gone"}).status_code == 422
+
+
+def test_a_camera_clip_that_fails_says_why(clips_api, plugin, farmhand, monkeypatch):
+    from streamer import farm
+
+    api, folder = clips_api
+    farm.cameras(plugin)
+    monkeypatch.setattr(clips.subprocess, "run", lambda args, **kw: subprocess.CompletedProcess(args, 1, b"", b"Connection refused\n"))
+    assert api.post("/api/clips", json={"source": "1:Bed", "seconds": 3}).status_code == 202
+    assert wait_until(lambda: api.get("/api/clips").json()["ended"] != [], timeout=3)
+    ended = api.get("/api/clips").json()["ended"][0]
+    assert not ended["ok"] and "Connection refused" in ended["text"] and list(folder.iterdir()) == []
