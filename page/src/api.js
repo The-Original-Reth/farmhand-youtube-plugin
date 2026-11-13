@@ -49,3 +49,17 @@ export const getClips = async () => normalizeClips(await request("/clips"));
 export const setClipLength = async (seconds) => normalizeClips(await request("/clips", jsonBody("PUT", { seconds })));
 export const takeClip = (tz) => request("/clips", jsonBody("POST", { tz: tz || null }));
 export const clipUrl = (name) => `${API_BASE}/clips/${encodeURIComponent(name)}`;
+
+// Where the plugin saves: a save location on the NAS (\server\share\folder and its login) that the plugin mounts itself,
+// with the stream folder and the YouTube clips folder inside it. { address (null: none yet, the container's own folders),
+// username, domain, version, hasPassword, mounted, problem, capability: { ok, message }, folders: [{ key, label, path (as
+// people reach it), relative (inside the save location, or null), problem }] }
+const normalizeSaveLocation = (r) => ({ ...r, hasPassword: r.has_password });
+export const getSaveLocation = async () => normalizeSaveLocation(await request("/save-location"));
+export const setSaveLocation = async ({ address, username, password, domain, version }) =>
+  normalizeSaveLocation(await request("/save-location", jsonBody("PUT", { address, username: username || null, password: password || null, domain: domain || null, version: version || null })));
+export const forgetSaveLocation = async () => normalizeSaveLocation(await request("/save-location?confirm=true", { method: "DELETE" }));
+export const moveSaveFolder = async (key, path) => normalizeSaveLocation(await request(`/save-location/folders/${encodeURIComponent(key)}`, jsonBody("PUT", { path })));
+// { path (inside the save location), shown_as, folders: [names] }
+export const browseSaveLocation = (path = "") => request(`/save-location/browse?path=${encodeURIComponent(path)}`);
+export const makeSaveFolder = (path, name) => request("/save-location/browse", jsonBody("POST", { path, name }));

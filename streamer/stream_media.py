@@ -18,9 +18,9 @@ import os
 import re
 from pathlib import Path
 
-from . import config, storage
+from . import save_location, storage
 from .errors import NotFound
-from .store import Store
+from .store import Store, store
 
 IMAGES, SLIDESHOWS, MUSIC = "images", "slideshows", "music"
 PICTURE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
@@ -32,16 +32,17 @@ NAME = re.compile(r"^[^/\\\0]{1,120}$")
 
 
 def _root() -> Path:
-    return Path(config.settings.media_dir)
+    """The stream folder: in the save location on the NAS once one is set (save_location.py), else the container's own."""
+    return save_location.stream_dir(store())
 
 
 def folder(db: Store, make: bool = False) -> Path:
     """The stream folder, while it can be used (StorageUnavailableError otherwise); with `make`, its folders made."""
     root = _root()
     if not root.is_dir():
-        raise storage.StorageUnavailableError(
-            f"The stream folder ({root}) isn't there. Give the plugin's container a folder for its pictures and music "
-            "(a bind mount or a NAS share mounted on its machine, at /media): see the plugin's README.")
+        raise storage.StorageUnavailableError(save_location.problem() or (
+            f"The stream folder ({root}) isn't there. Set the plugin's save location on its settings (Farmhand's Settings "
+            "page, under its name), or give its container a folder at /media: see the plugin's INSTALL.md."))
     if make:
         for d in (IMAGES, SLIDESHOWS, MUSIC):
             (root / d).mkdir(parents=True, exist_ok=True)
@@ -166,7 +167,7 @@ def _read(db: Store) -> dict:
         except OSError:
             pass
     except storage.StorageUnavailableError as e:
-        return {"path": str(_root()), "windows_path": config.settings.media_shown_as, "images": [], "slideshows": [], "music": [], "error": str(e)}
+        return {"path": str(_root()), "windows_path": save_location.shown_as(store(), "stream"), "images": [], "slideshows": [], "music": [], "error": str(e)}
     shows = []
     try:
         for e in sorted(os.scandir(root / SLIDESHOWS), key=lambda e: _natural(e.name)):
@@ -174,7 +175,7 @@ def _read(db: Store) -> dict:
                 shows.append({"name": e.name, "images": _slides_in(Path(e.path))})
     except OSError:
         pass
-    return {"path": str(root), "windows_path": config.settings.media_shown_as, "images": _pictures_in(root / IMAGES), "slideshows": shows,
+    return {"path": str(root), "windows_path": save_location.shown_as(store(), "stream"), "images": _pictures_in(root / IMAGES), "slideshows": shows,
             "music": _files_in(root / MUSIC, TRACK_TYPES), "error": None}
 
 

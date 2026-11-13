@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import config
+from . import save_location
 from .errors import answer_errors
 from .live_stream import clips, procs
 from .routes import get_db
@@ -32,11 +32,11 @@ class ClipIn(BaseModel):
 
 @router.get("")
 def clips_page(db: Store = Depends(get_db)):
-    folder = config.settings.clips_dir
+    folder = save_location.clips_dir(db)
     return {
         "seconds": clips.seconds_of(db), "least": clips.LEAST_SECONDS, "most": clips.MOST_SECONDS,
         "held": clips.recent.held(),
-        "folder": {"path": str(folder), "shown_as": config.settings.clips_shown_as, "problem": clips.folder_problem(folder)},
+        "folder": {"path": str(folder), "shown_as": save_location.shown_as(db, "clips"), "problem": clips.folder_problem(folder)},
         "clips": clips.listed(folder),
     }
 
@@ -55,13 +55,13 @@ def take_clip(payload: ClipIn, db: Store = Depends(get_db)):
     if not ffmpeg:
         raise HTTPException(status_code=503, detail="ffmpeg isn't installed where the plugin runs.")
     with answer_errors(invalid=409):
-        return clips.save(ffmpeg, config.settings.clips_dir, payload.seconds or clips.seconds_of(db), payload.tz)
+        return clips.save(ffmpeg, save_location.clips_dir(db), payload.seconds or clips.seconds_of(db), payload.tz)
 
 
 @router.get("/{name}")
-def get_clip(name: str):
+def get_clip(name: str, db: Store = Depends(get_db)):
     try:
-        path = clips.clip_path(config.settings.clips_dir, name)
+        path = clips.clip_path(save_location.clips_dir(db), name)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     return FileResponse(path, media_type="video/mp4", filename=name)

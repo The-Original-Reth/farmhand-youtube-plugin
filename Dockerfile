@@ -13,8 +13,9 @@ WORKDIR /app
 # ffmpeg reads the cameras and makes the stream; the fonts are the ones a square's words can be written in
 # (live_stream/fonts.py FONTS). Debian's ffmpeg can use an NVIDIA card's encoder (NVENC) when the container is given
 # the card and its driver's libraries (see README); it falls back to the processor otherwise.
+# cifs-utils and nfs-common: the plugin mounts its save location on the NAS itself (save_location.py)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core \
+ && apt-get install -y --no-install-recommends ffmpeg cifs-utils nfs-common fonts-dejavu-core \
     fonts-liberation fonts-roboto-unhinted fonts-open-sans fonts-lato fonts-montserrat fonts-bebas-neue fonts-comic-neue fonts-firacode \
  && rm -rf /var/lib/apt/lists/*
 

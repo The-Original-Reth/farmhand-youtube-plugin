@@ -8,22 +8,8 @@ machine). Use your own.
 
 ## 1. Prepare the machine
 
-Install **Docker** and **git** (Docker builds the plugin straight from GitHub).
-
-If the stream and clips folders are on the NAS, make a `YouTube clips` folder there beside the stream folder, then add
-these two lines to `/etc/fstab`. `/root/.nas-stream` is a credentials file you make, with `username=` and `password=`
-lines, readable only by root.
-
-```
-//192.168.10.240/3d_Printing_Elves/Farmhand/stream /mnt/stream cifs credentials=/root/.nas-stream,vers=3.1.1,uid=0,gid=0,file_mode=0664,dir_mode=0775,iocharset=utf8,soft,_netdev,nofail 0 0
-//192.168.10.240/3d_Printing_Elves/Farmhand/YouTube\040clips /mnt/youtube-clips cifs credentials=/root/.nas-stream,vers=3.1.1,uid=0,gid=0,file_mode=0664,dir_mode=0775,iocharset=utf8,soft,_netdev,nofail 0 0
-```
-
-`\040` stands for the space in "YouTube clips": write it just like that. Then mount them:
-
-```bash
-sudo mkdir -p /mnt/stream /mnt/youtube-clips && sudo mount -a
-```
+Install **Docker** and **git** (Docker builds the plugin straight from GitHub). Nothing else: the plugin connects to
+the NAS itself, once you give it the address in Farmhand (section 6).
 
 ## 2. Get the compose file and edit it
 
@@ -39,10 +25,6 @@ sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Origin
 sudo nano /opt/farmhand-stream/docker-compose.yml
 ```
 
-- `./media:/media` becomes `/mnt/stream:/media`.
-- `./clips:/clips` becomes `"/mnt/youtube-clips:/clips"`.
-- Optional: uncomment `environment:` and set `STREAM_FOLDER_SHOWN_AS` and `STREAM_CLIPS_SHOWN_AS`, so the page shows
-  the folders' network paths.
 - Optional, for an NVIDIA card: uncomment the `devices:` and library lines (driver set-up: the
   [README](README.md#an-nvidia-card), "An NVIDIA card").
 
@@ -97,7 +79,14 @@ and restart as above.
 **YouTube** is now in Farmhand's menu, after Monitor. There: sign in to YouTube (**YouTube settings**) or paste a stream
 key, choose the grid and cameras, and press **Go live**.
 
-**Clips** work once the clips folder is mounted: type a length (1 second to 5 minutes) and press **Save clip**.
+**Where it saves:** on Farmhand's **Settings** page, under **YouTube Stream**, type the save location on your NAS as
+`\\192.168.10.240\3d_Printing_Elves\Farmhand` with its username and password, and press **Use this location**. The
+plugin connects to it and makes a `stream` folder (its pictures, slideshows and music) and a `YouTube clips` folder
+inside it; **Change…** beside either puts it in another folder of the save location. The password is kept by the
+plugin and never shown again. (Until then it uses the folders its container was given, `./media` and `./clips`
+beside the compose file.)
+
+**Clips:** type a length (1 second to 5 minutes) on the YouTube page and press **Save clip**.
 
 ## Updating
 
