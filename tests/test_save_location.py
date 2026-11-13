@@ -1,4 +1,4 @@
-"""
+r"""
 Where the plugin saves: a save location on the NAS (\\server\share\folder and its login) that the plugin mounts itself,
 with the stream folder and the YouTube clips folder inside it, each changeable; and the container's own folders until
 one is set (save_location.py, save_location_routes.py). `mount` is a stand-in: the "share" is a folder of the test's.
