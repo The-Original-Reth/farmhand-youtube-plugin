@@ -75,6 +75,49 @@ def test_the_buffer_gives_the_holding_screen_until_the_delay_is_held_then_whats_
     buffer.close()
 
 
+def test_a_holding_screen_stuck_writing_is_still_ended(monkeypatch):
+    """Once the delay is held nothing reads the holding screen's ffmpeg any more, so it's stuck writing to a full pipe,
+    where terminate() never reaches it (on CT 108 one ran on for 19 minutes, still fed the music). Its stdout is closed,
+    and it's killed if it hasn't ended a moment later."""
+    import threading
+
+    from streamer.live_stream import buffer as relay
+
+    monkeypatch.setattr(relay, "STOP_WAIT", 0.2)
+
+    class Stuck:
+        def __init__(self):
+            self.ended = threading.Event()
+            self.asked = self.closed = self.killed = False
+            this = self
+
+            class Out:
+                def close(self):
+                    this.closed = True
+
+            self.stdout = Out()
+
+        def poll(self):
+            return 1 if self.ended.is_set() else None
+
+        def terminate(self):
+            self.asked = True  # (stuck in a write: it doesn't end)
+
+        def wait(self, timeout=None):
+            if not self.ended.wait(timeout):
+                raise TimeoutError
+
+        def kill(self):
+            self.killed = True
+            self.ended.set()
+
+    stuck = Stuck()
+    relay._stop(stuck)
+    assert stuck.asked and stuck.closed
+    assert wait_until(lambda: stuck.killed, timeout=2) and stuck.poll() is not None
+    relay._stop(stuck)  # (one already ended: nothing more)
+
+
 def test_going_live_again_after_a_restart_shows_the_holding_screen_while_the_delay_fills(api, ffmpeg, farmhand, plugin):
     from streamer.live_stream import stream
 
