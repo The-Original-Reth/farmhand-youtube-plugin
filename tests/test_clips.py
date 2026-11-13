@@ -261,3 +261,32 @@ def test_a_camera_clip_that_fails_says_why(clips_api, plugin, farmhand, monkeypa
     assert wait_until(lambda: api.get("/api/clips").json()["ended"] != [], timeout=3)
     ended = api.get("/api/clips").json()["ended"][0]
     assert not ended["ok"] and "Connection refused" in ended["text"] and list(folder.iterdir()) == []
+
+
+def test_the_clip_list_follows_cameras_added_and_removed_in_farmhand(api, plugin, farmhand):
+    """The watcher asks Farmhand for the cameras (every minute while the plugin runs): a camera added there shows up
+    in the Clip drop-down, one removed (or its printer) goes; a printer that's only off keeps what it had."""
+    from streamer import camera_watch
+
+    from .fake_farmhand import camera
+
+    keys = lambda: [s["key"] for s in api.get("/api/clips").json()["sources"]]  # noqa: E731
+    camera_watch.refresh()
+    assert keys() == ["stream", "2:Camera", "1:Bed"]
+
+    farmhand.cameras[3] = {"printer_id": 3, "printer_name": "VT 1026", "error": None,
+                           "cameras": [camera("Front", "http://10.0.6.40/webcam/?action=stream")]}
+    camera_watch.refresh()
+    assert keys() == ["stream", "2:Camera", "3:Front", "1:Bed"]  # added (in order of printer name)
+
+    farmhand.cameras[1]["cameras"] = []
+    camera_watch.refresh()
+    assert "1:Bed" not in keys()  # its camera removed in Mainsail
+
+    farmhand.cameras[3] = {"printer_id": 3, "printer_name": "VT 1026", "error": "Moonraker didn't answer.", "cameras": []}
+    camera_watch.refresh()
+    assert "3:Front" in keys()  # only off: kept
+
+    del farmhand.cameras[3]
+    camera_watch.refresh()
+    assert "3:Front" not in keys()  # taken off Farmhand

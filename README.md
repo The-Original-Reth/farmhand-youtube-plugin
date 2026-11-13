@@ -86,6 +86,8 @@ stream folder that page used, so the squares find their pictures.
 ## Clips
 
 The **Clip** drop-down on the page says what to clip: **Stream**, or any camera Farmhand can see (its printer's name).
+It follows Farmhand by itself: the plugin asks Farmhand for the cameras every minute, so a camera added there (or in
+Mainsail) shows up and one removed goes, within a minute; a printer that's only switched off keeps its cameras.
 
 - **Stream:** **Save clip** saves the last stretch of what went to YouTube, at once (below).
 - **A camera:** **Record clip** records the next stretch from that camera, straight from it, in the background; the
