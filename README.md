@@ -63,21 +63,25 @@ git clone https://github.com/The-Original-Reth/farmhand-youtube-plugin.git && cd
 docker build -t farmhand-stream .
 ```
 
-## The stream folder
+## Where it saves
 
-The stream's pictures, slideshows and music are files in a folder you give the container at `/media` (`images/`,
-`slideshows/<name>/`, `music/`; the plugin makes them). Moving over from Farmhand's old Stream page, give it the same
-stream folder that page used (usually `stream` beside the STL folder on the NAS; the move from Farmhand says where, if
-one was chosen), so the squares find their pictures:
+Like Farmhand, the plugin keeps everything in one **save location** on the NAS, set on its settings (Farmhand's
+**Settings** page, under its name): the share's address as `\\server\share\folder` with its login. The plugin mounts it
+itself (`streamer/mounts.py`, a copy of Farmhand's own; its container has `SYS_ADMIN` and `DAC_READ_SEARCH` for that,
+as Farmhand's has) and uses a folder inside it for each thing it keeps, made if it isn't there:
 
-- **A folder on the plugin's machine**: `-v /opt/farmhand-stream/media:/media`.
-- **A NAS share**: mount it on the plugin's machine (in `/etc/fstab`, e.g. `//nas/3d_Printing_Elves/Farmhand/stream
-  /mnt/stream cifs credentials=/root/.nas,uid=0,gid=0,iocharset=utf8 0 0`, or NFS), then `-v /mnt/stream:/media`.
-  Docker can also mount it itself with a `cifs` volume (see the compose example below).
+- **Stream folder** (`stream`): the stream's pictures (`images/`), slideshows (`slideshows/<name>/`) and music (`music/`).
+- **YouTube clips** (`YouTube clips`): where **Save clip** puts its MP4s.
 
-Pictures added on the page are written there; ones copied in by hand count too (press **Resync**). Set
-`STREAM_FOLDER_SHOWN_AS` to the folder as people reach it over the network (e.g. `\\nas\3d_Printing_Elves\Farmhand\stream`)
-and the page shows it, for copying files in by hand.
+Each is shown as people reach it on the network (`\\server\share\folder\stream`), with a **Change…** to put it in another
+folder of the save location. The password is kept in the plugin's own volume and never comes back out. The mount is
+made again whenever the plugin starts, and whenever a folder is asked for and it isn't there (a NAS that was off).
+
+Until a save location is set, the plugin uses the folders its container is given, `/media` and `/clips`
+(`STREAM_FOLDER`, `STREAM_CLIPS`, shown as `STREAM_FOLDER_SHOWN_AS` and `STREAM_CLIPS_SHOWN_AS`), as earlier versions
+did, so a machine set up that way carries on unchanged. Pictures added on the page are written to the stream folder;
+ones copied in by hand count too (press **Resync**). Moving over from Farmhand's old Stream page, choose the same
+stream folder that page used, so the squares find their pictures.
 
 ## Clips
 
@@ -91,12 +95,8 @@ or just before the time asked for (one comes every 2 seconds), so a clip can be 
 zone: `2026-11-12 18-26-03 (30 s).mp4`. It's written beside its final name and renamed once whole, so the folder never
 shows half a clip. The page lists the newest ten, to download.
 
-The clips folder is the one the container is given at `/clips`: on the farm, the NAS's **YouTube clips** folder, beside
-the stream folder. Mount it on the plugin's machine like the stream folder (e.g. in `/etc/fstab`,
-`//nas/3d_Printing_Elves/Farmhand/YouTube\040clips /mnt/youtube-clips cifs credentials=/root/.nas,uid=0,gid=0,iocharset=utf8 0 0`,
-where `\040` is the space in its name), then `- "/mnt/youtube-clips:/clips"` in the compose file. Set
-`STREAM_CLIPS_SHOWN_AS` to it as people reach it (`\\nas\3d_Printing_Elves\Farmhand\YouTube clips`) and the page says
-so. Without a folder there, the page says what's missing and the button waits.
+The clips go in the save location's **YouTube clips** folder (see [Where it saves](#where-it-saves)); without a
+folder to write to, the page says what's missing and the button waits.
 
 ## Run it
 

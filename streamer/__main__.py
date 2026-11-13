@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 
-from . import config, migrate, store
+from . import config, migrate, save_location, store
 from .app import app
 from .live_stream import stream
 
@@ -15,6 +15,7 @@ async def _running(_app):
     """While the plugin runs (set here, not in app.py, so tests using the app never go live by themselves)."""
     s = store.store()
     migrate.at_start(s)  # the first start: Farmhand's Stream page set-up brought over, when allowed
+    save_location.ensure(s)  # the save location on the NAS mounted again (a mount is gone once the container restarts)
     stream.resume(s, store.session_factory)  # live before the restart: live again
     yield
     # (only the container stopping: it goes live again when it starts, on the same YouTube broadcast, so that's left live)

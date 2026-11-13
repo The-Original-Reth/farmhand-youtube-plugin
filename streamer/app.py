@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from . import clip_routes, farm, page_routes
+from . import clip_routes, farm, page_routes, save_location_routes
 from .routes import router
 
 HERE = Path(__file__).resolve().parent
@@ -27,6 +27,7 @@ app = FastAPI(title="Farmhand Stream plugin", docs_url=None, redoc_url=None, ope
 app.include_router(router)
 app.include_router(page_routes.router)
 app.include_router(clip_routes.router)
+app.include_router(save_location_routes.router)
 
 
 def read_manifest() -> dict:
