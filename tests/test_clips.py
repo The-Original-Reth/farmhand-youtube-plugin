@@ -4,7 +4,6 @@ as an MP4 in the clips folder, starting at a whole frame (live_stream/clips.py, 
 """
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 

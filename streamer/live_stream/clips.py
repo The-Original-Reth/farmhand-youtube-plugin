@@ -68,8 +68,7 @@ class Recent:
             return b"", 0.0
         cut = now - seconds
         first = next((i for i, (sent, _) in enumerate(pieces) if sent >= cut), len(pieces) - 1)
-        # a whole frame at or before the cut, else the first after it
-        for i in [*range(first, -1, -1), *range(first + 1, len(pieces))]:
+        for i in [*range(first, -1, -1), *range(first + 1, len(pieces))]:  # a whole frame at or before the cut, else after
             at = keyframe_at(pieces[i][1])
             if at is not None:
                 data = pieces[i][1][at:] + b"".join(p for _, p in pieces[i + 1:])
@@ -85,6 +84,10 @@ class Recent:
 recent = Recent()
 
 
+def clamp(seconds: int) -> int:
+    return max(LEAST_SECONDS, min(MOST_SECONDS, seconds))
+
+
 def seconds_of(db) -> int:
     """How long a clip is, as set on the page."""
     try:
@@ -94,14 +97,11 @@ def seconds_of(db) -> int:
 
 
 def set_seconds(db, seconds: int) -> int:
-    if not LEAST_SECONDS <= int(seconds) <= MOST_SECONDS:
+    seconds = int(seconds)
+    if clamp(seconds) != seconds:
         raise ValueError(f"A clip is {LEAST_SECONDS} second to {MOST_SECONDS // 60} minutes long.")
-    db.put(CLIP_KEY, str(int(seconds)))
-    return int(seconds)
-
-
-def clamp(seconds: int) -> int:
-    return max(LEAST_SECONDS, min(MOST_SECONDS, seconds))
+    db.put(CLIP_KEY, str(seconds))
+    return seconds
 
 
 def folder_problem(folder: Path) -> str | None:
@@ -117,12 +117,12 @@ def folder_problem(folder: Path) -> str | None:
 def listed(folder: Path, most: int = SHOWN) -> list[dict]:
     """The newest clips in the folder: [{name, size (bytes), made (ISO time)}], newest first."""
     try:
-        found = [p for p in folder.iterdir() if p.is_file() and NAME.match(p.name)]
+        found = [(p.name, p.stat()) for p in folder.iterdir() if p.is_file() and NAME.match(p.name)]
     except OSError:
         return []
-    found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return [{"name": p.name, "size": p.stat().st_size,
-             "made": datetime.fromtimestamp(p.stat().st_mtime).astimezone().isoformat()} for p in found[:most]]
+    found.sort(key=lambda f: f[1].st_mtime, reverse=True)
+    return [{"name": name, "size": st.st_size, "made": datetime.fromtimestamp(st.st_mtime).astimezone().isoformat()}
+            for name, st in found[:most]]
 
 
 def clip_path(folder: Path, name: str) -> Path:
@@ -146,8 +146,7 @@ def save(ffmpeg: str, folder: Path, seconds: int, tz: str | None = None, run=Non
         raise ValueError("Nothing has gone to YouTube yet: a clip is taken from what the stream has sent.")
     when = datetime.now(_zone(tz))
     name = _free_name(folder, f"{when:%Y-%m-%d %H-%M-%S}", round(got))
-    final = folder / name
-    part = folder / f".{name}.part"
+    final, part = folder / name, folder / f".{name}.part"
     with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as ts:
         ts.write(data)
     try:
