@@ -1,4 +1,4 @@
-"""
+r"""
 Where the plugin saves, set on its settings page (shown on Farmhand's Settings page under the plugin's name), as
 Farmhand sets its own: a save location on the NAS, typed as \\server\share\folder with its login, which the plugin
 mounts itself (mounts.py), and a folder inside it for each kind of thing it keeps:
