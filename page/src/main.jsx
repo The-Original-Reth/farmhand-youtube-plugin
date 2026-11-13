@@ -9,11 +9,13 @@ import { PluginPanel } from "./PluginPanel.jsx";
 import { StreamSection } from "./stream/StreamSection.jsx";
 import { YouTubeGuide } from "./stream/YouTubeGuide.jsx";
 import { YouTubeSettingsWindow } from "./stream/YouTubeSettings.jsx";
+import { SettingsView } from "./SettingsView.jsx";
 
 // The Stream plugin's page: Farmhand's Stream page, served by the plugin and shown inside Farmhand at /plugins/stream/.
 // It takes Farmhand's colours and font through Farmhand's helper (farmhand-plugin.js), changing the theme in place as
 // Farmhand's own pages do (theme.js), and draws again when they change. Pages of their own, opened in a new tab or
-// window: ?view=youtube-guide (connecting to a YouTube channel) and ?view=youtube-settings.
+// window: ?view=youtube-guide (connecting to a YouTube channel) and ?view=youtube-settings. And ?view=settings: where it
+// saves and how long a clip is, shown on Farmhand's Settings page under the plugin's name (the manifest's settings_page).
 
 function useFarmhandTheme() {
   const [, setDrawn] = useState(0);
@@ -58,6 +60,7 @@ function Root() {
   const view = new URLSearchParams(window.location.search).get("view");
   if (view === "youtube-guide") return <YouTubeGuide />;
   if (view === "youtube-settings") return <YouTubeSettingsWindow />;
+  if (view === "settings") return <SettingsView />; // (shown on Farmhand's Settings page, under the plugin's name)
   return (
     <FarmProvider>
       <StreamPage />
