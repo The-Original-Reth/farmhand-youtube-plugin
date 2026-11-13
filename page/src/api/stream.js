@@ -156,6 +156,14 @@ export const removeSlideshowPicture = async (show, name) => normalizeStream(awai
 // While live: "play", "pause", "next" or "back" (the track from its start, or in its first 3 s the one before).
 export const musicControl = async (action) => normalizeStream(await post(`/stream/music/${action}`));
 export const streamTrackUrl = (name) => `${API_BASE}/stream/music/${enc(name)}`;
+// The volume slider while live: the music going out follows it straight away, not saved. null: back to the saved volume.
+// Said again every few seconds while it stays (a volume not said for 20 s goes back by itself). `leaving`: the page is
+// closing, so it's sent in a way that still arrives (sendBeacon).
+export const tryMusicVolume = (volume, leaving = false) => {
+  const body = JSON.stringify({ volume });
+  if (leaving && navigator.sendBeacon) return navigator.sendBeacon(`${API_BASE}/stream/music-volume`, new Blob([body], { type: "application/json" }));
+  return request("/stream/music-volume", { method: "POST", headers: { "Content-Type": "application/json" }, body }).catch(() => null);
+};
 export const uploadStreamMusic = async (files) => normalizeStream(await request("/stream/music", filesBody(files)));
 export const removeStreamTrack = async (name) => normalizeStream(await del(`/stream/music/${enc(name)}`));
 

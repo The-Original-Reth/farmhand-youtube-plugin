@@ -205,12 +205,34 @@ class Buffer:
         return True
 
 
+STOP_WAIT = 5  # seconds the holding screen's ffmpeg is given to end once asked, before it's killed
+
+
 def _stop(proc) -> None:
-    """End the holding screen's ffmpeg (a stand-in may have nothing to end)."""
+    """End the holding screen's ffmpeg (a stand-in may have nothing to end). Once the delay is held nothing reads its
+    stdout any more, so it's usually stuck writing to a full pipe, where asking it to stop (terminate) never reaches it:
+    its stdout is closed too (its write then fails and it ends), and it's killed if it's still there STOP_WAIT seconds
+    later. (Left running, it went on taking the music and a share of the card for as long as the stream was live.)"""
     if proc is None:
         return
     try:
-        if proc.poll() is None:
-            proc.terminate()
+        if proc.poll() is not None:
+            return
+        proc.terminate()
     except (AttributeError, OSError):
+        return
+    try:
+        proc.stdout.close()
+    except (AttributeError, OSError, ValueError):
         pass
+
+    def make_sure() -> None:
+        try:
+            proc.wait(timeout=STOP_WAIT)
+        except Exception:  # noqa: BLE001 - one that won't end is killed
+            try:
+                proc.kill()
+            except (AttributeError, OSError):
+                pass
+
+    threading.Thread(target=make_sure, name="stream-holding-end", daemon=True).start()

@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Music, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { c } from "../theme.js";
 import { headerButton, linkButton, uiText } from "../styles.js";
-import { musicControl, removeStreamTrack, scanStreamFolder, streamTrackUrl, uploadStreamMusic } from "../api.js";
+import { musicControl, removeStreamTrack, scanStreamFolder, streamTrackUrl, tryMusicVolume, uploadStreamMusic } from "../api.js";
 import { heading, help, label12, panel } from "./streamStyles.js";
 import { OpenFolder } from "./MediaChoices.jsx";
 
 // The stream's music: MP3s in the stream folder's music folder (StreamBeats, say), played one after another and round
 // again (shuffled each round, if chosen), in place of the silent sound track, starting with the stream. On or off, its
-// volume and shuffling are saved with the page's Save (and followed straight away while live); tracks are uploaded and
+// volume and shuffling are saved with the page's Save (and followed straight away while live; the volume is heard on
+// YouTube as the slider moves, before Save, and the saved one comes back when the page is left); tracks are uploaded and
 // deleted straight away. Back, Play/Pause and Next, beside "Play music on the stream": while live, the music going out
 // (the server's music player); not live, the tracks played here in this browser, at the volume chosen, to hear how they
 // sound (each track's own ▶ too). `shown`/`change`: the page's choices; `media`: the stream folder (media.music: the
@@ -20,8 +21,43 @@ export const musicGain = (volume) => (Math.max(0, Math.min(100, Number(volume) |
 const BACK_RESTARTS = 3; // seconds into a track after which Back starts it again, as on the stream
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const small = { ...headerButton(), padding: "0 6px" };
+const SAY_AGAIN = 8000; // ms between saying a tried volume again (the server lets one go after 20 s without)
 
-export function MusicPanel({ shown, change, media, ask, busy, live, onAir = null, heardAt = 0, enabled = true, control = null, onWaiting = null, muted = false }) {
+// While live, the volume slider is heard on YouTube straight away, not saved: a volume other than the saved one is sent
+// (and said again while it stays), and the saved one is put back when the slider's back on it, the change is undone,
+// saved, or the page is left.
+function useVolumeHeardLive(live, volume, saved) {
+  const trying = useRef(false);
+  useEffect(() => {
+    if (!live || saved == null) return undefined;
+    if (volume === saved) {
+      if (trying.current) tryMusicVolume(null);
+      trying.current = false;
+      return undefined;
+    }
+    const say = () => tryMusicVolume(volume);
+    const soon = setTimeout(say, 150); // (as the slider moves: the volume it rests on)
+    const again = setInterval(say, SAY_AGAIN);
+    trying.current = true;
+    return () => {
+      clearTimeout(soon);
+      clearInterval(again);
+    };
+  }, [live, volume, saved]);
+  useEffect(() => {
+    const leave = () => {
+      if (trying.current) tryMusicVolume(null, true);
+      trying.current = false;
+    };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave(); // (the page's music part closed: Farmhand moved to another page)
+    };
+  }, []);
+}
+
+export function MusicPanel({ shown, change, media, ask, busy, live, onAir = null, heardAt = 0, enabled = true, control = null, onWaiting = null, muted = false, savedVolume = null }) {
   const input = useRef(null);
   const player = useRef(null);
   const paused = useRef(false); // paused here by hand: it stays so until played again (or the switch turned on again)
@@ -32,6 +68,7 @@ export function MusicPanel({ shown, change, media, ask, busy, live, onAir = null
   const [opening, setOpening] = useState(false); // showing where the music folder is, for File Explorer
   const [, tick] = useState(0); // (live: the time into the track goes on between the page's looks)
   const tracks = media.music || [];
+  useVolumeHeardLive(live, shown.musicVolume, savedVolume);
   const off = !!busy || !!media.error;
   const playing = here && !here.paused ? here.name : null;
   // the browser holding the music back until the page is clicked: the page says so by the switch, where it's seen
