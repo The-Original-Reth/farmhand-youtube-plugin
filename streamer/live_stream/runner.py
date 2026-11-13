@@ -11,7 +11,6 @@ the plugin's own restart it goes live again by itself (resume()).
 from __future__ import annotations
 
 import collections
-import os
 import shutil
 import tempfile
 import threading
@@ -21,24 +20,23 @@ from datetime import datetime, timezone
 
 from ..store import Store, store
 from .. import app_settings, config, farm, stream_media, youtube_live
-from . import clips, feeders, holding, music, procs, staging
+from . import clips, feeders, holding, layout_picture, music, procs
 from .cameras import CamerasMixin
 from .pictures import PicturesMixin
 from .self_check import SelfCheckMixin
 from .sending import SendingMixin
 from .broadcast import Broadcast, own_stream, title_on_active
 from .constants import DEFAULT_RESOLUTION, DESTINATIONS, KEPT_LINES, RESOLUTIONS, STREAM_KEY_KEY
-from .fonts import font_file
 from .choices import settings
 from .encoders import encoder
 from .buffer import Buffer
 from .relay import Relay
-from .sources import Source, sources
-from .picture import Look, command, sender_command, timetable
-from .staging import write_atomically
+from .sources import sources
+from .picture import sender_command
 
 LIVE_KEY = "live_wanted"  # in the plugin's store while the stream is meant to be live: it goes live again after a restart
 RESUME_EVERY = 30  # seconds between tries at going live again after a restart, while it can't yet
+
 
 class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
     """The one live stream: started with go_live (which, while live, hands over to the new layout), ended with stop.
@@ -183,50 +181,11 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
 
         # each camera's feeder: the ones already reading it carry on (a new layout never connects to a camera again)
         with self._lock:
-            resolution = self._resolution or DEFAULT_RESOLUTION
-        size = RESOLUTIONS.get(resolution, RESOLUTIONS[DEFAULT_RESOLUTION])[:2]
+            resolution, cache = self._resolution, self._cache  # (this time live's, whatever is saved now)
+        size = RESOLUTIONS.get(resolution or DEFAULT_RESOLUTION, RESOLUTIONS[DEFAULT_RESOLUTION])[:2]
         fed = self._feed(ffmpeg, srcs, size)
-        own_cells = {c["camera"]: c for c in chosen["cells"] if c and "camera" in c}
-
-        def looks(s) -> feeders.DownFrames:  # its "Camera down" square: its own colour and words' font and colour
-            mine = own_cells.get(s.key) or {}
-            return feeders.DownFrames(mine.get("background") or chosen["background"], font_file(mine.get("words_font") or chosen["font"]),
-                                      mine.get("words_color") or chosen["color"], s.name or s.label)
-
-        downs = [looks(s) for s in srcs]
-
-        # the picture for this layout: its own folder, words and command (the old one's keeps going until it's handed
-        # over); slideshow screens already put together this session are reused
-        folder = tempfile.mkdtemp(prefix="farmhand-stream-")
-        files = [os.path.join(folder, f"{i}.txt") for i in range(len(srcs))] if chosen["show_status"] else None
-        for i, s in enumerate(srcs):
-            if files:
-                write_atomically(files[i], s.label)
-        cycle = (chosen["seconds_all"], chosen["seconds_each"]) if chosen["layout"] == "cycle" and len(srcs) > 1 else None
-        with self._lock:
-            cache = self._cache
-            resolution = self._resolution  # (this time live's, whatever is saved now)
-        cells = staging.squares(db, chosen, folder, cache=cache)
-        turns_file = os.path.join(folder, "turns.txt") if cycle else None
         enc = encoder(ffmpeg)
-
-        starts = [0]
-
-        def make(clock: float, offset: float) -> tuple[list[str], feeders.Pump]:
-            """The command for a picture ffmpeg starting now (`clock`: the time of day, so its slideshows and turns keep
-            the page's; `offset`: the stream's age, its times' start), and the pump feeding it its cameras: its own pipes,
-            so one starting beside the one going out never takes its frames."""
-            if turns_file:
-                write_atomically(turns_file, timetable(len(srcs), *cycle, clock=clock))
-            starts[0] += 1
-            paths = [os.path.join(folder, f"camera-{i}-{starts[0]}.mjpeg") for i in range(len(srcs))]
-            pump = feeders.Pump(list(zip(fed, downs)), paths)
-            piped = [Source(s.printer_id, s.label, feeders.pipe_input(p), [], key=s.key, name=s.name) for s, p in zip(srcs, paths)]
-            return command(ffmpeg, piped, url, Look(encoder=enc, clock=clock,
-                status_files=files, cycle=cycle, turns_file=turns_file,
-                resolution=resolution, border_color=chosen["border_color"], background=chosen["background"], font=chosen["font"], color=chosen["color"], cols=chosen["cols"],
-                rows=chosen["rows"], cells=cells, music=True, relay_offset=offset, lists_dir=folder,
-            )), pump
+        folder, files, make = layout_picture.prepare(db, chosen, ffmpeg, url, srcs, fed, enc, resolution, cache)
 
         with self._lock:
             gen = self._generation
@@ -280,8 +239,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
 
         # the music starts with the stream (when it's on and there are tracks; silence otherwise)
         player = music.Player(ffmpeg, tracks, on=chosen["music"], shuffle=chosen["music_shuffle"], volume=chosen["music_volume"])
-        buffer = Buffer(chosen["delay"])
-        buffer.sent = clips.recent.add  # (what goes to YouTube, kept for clips)
+        buffer = Buffer(chosen["delay"], sent=clips.recent.add)  # (what goes to YouTube, kept for clips)
         with self._lock:
             self._generation += 1
             gen = self._generation
@@ -320,23 +278,10 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
     def _hold(self, db: Store, chosen: dict, ffmpeg: str, buffer: Buffer, player) -> None:
         """After the plugin's own restart: the holding screen to YouTube straight away, while the delay fills again
         behind it (holding.py). Best tried: without it the stream still goes live, as from Go live."""
-        width, height, kbps = RESOLUTIONS.get(chosen["resolution"], RESOLUTIONS[DEFAULT_RESOLUTION])
-        mine = chosen["holding"]
-        colours = holding.look(mine, chosen)
-        picture = None
-        if mine.get("image"):
-            try:
-                picture = str(stream_media.picture_path(db, None, mine["image"]))
-            except (ValueError, OSError, LookupError):
-                picture = None  # (gone from the stream folder: the words alone)
         with self._lock:
             folder = self._cache
-        try:
-            png = os.path.join(folder, "holding.png")
-            holding.draw(png, width, height, mine["text"], colours["background"], colours["color"], font_file(colours["font"]), picture)
-            proc = procs.popen(holding.command(ffmpeg, png, encoder(ffmpeg), kbps), feed=True, out=True)
-        except (OSError, ValueError, TypeError) as e:
-            print(f"stream: the holding screen couldn't be shown ({e}); going live without it", flush=True)
+        proc = holding.start(db, chosen, ffmpeg, folder)
+        if proc is None:
             return
         threading.Thread(target=self._listen, args=(proc,), name="stream-holding-listen", daemon=True).start()
         if player:

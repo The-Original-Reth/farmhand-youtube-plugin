@@ -252,8 +252,13 @@ def _api(method: str, path: str, token: str, params: dict, body: dict | None = N
     return r.json() if r.content else {}  # (a delete answers with nothing)
 
 
+def _items(token: str, path: str, params: dict) -> list[dict]:
+    """What YouTube lists at `path` ([] for none)."""
+    return _api("GET", path, token, params).get("items") or []
+
+
 def _channel_name(token: str) -> str | None:
-    items = _api("GET", "/channels", token, {"part": "snippet", "mine": "true"}).get("items") or []
+    items = _items(token, "/channels", {"part": "snippet", "mine": "true"})
     return (items[0].get("snippet") or {}).get("title") if items else None
 
 
@@ -263,12 +268,11 @@ def set_broadcast_text(creds: dict, title: str, description: str) -> dict:
     YouTubeError(retry=True) while there's no live broadcast yet.
     """
     token = _access_token(creds)
-    found = _api("GET", "/liveBroadcasts", token, {"part": "id,snippet", "broadcastStatus": "active", "broadcastType": "all", "maxResults": 5})
-    items = found.get("items") or []
+    items = _items(token, "/liveBroadcasts", {"part": "id,snippet", "broadcastStatus": "active", "broadcastType": "all", "maxResults": 5})
     if not items:
         raise YouTubeError("YouTube has no live broadcast on the channel yet.", retry=True)
     video_id = items[0]["id"]
-    videos = _api("GET", "/videos", token, {"part": "snippet", "id": video_id}).get("items") or []
+    videos = _items(token, "/videos", {"part": "snippet", "id": video_id})
     old = (videos[0].get("snippet") if videos else None) or {}
     snippet = {
         "title": title or old.get("title") or "Live",
@@ -298,7 +302,7 @@ def own_stream(creds: dict, stream_id: str | None) -> dict:
     needs another."""
     token = _access_token(creds)
     if stream_id:
-        items = _api("GET", "/liveStreams", token, {"part": "id,cdn", "id": stream_id}).get("items") or []
+        items = _items(token, "/liveStreams", {"part": "id,cdn", "id": stream_id})
         if items:
             return _stream_out(items[0])
     made = _api("POST", "/liveStreams", token, {"part": "snippet,cdn,contentDetails"}, {
@@ -322,6 +326,11 @@ def _video_snippet(yt: dict, title: str, description: str) -> dict:
     return snippet
 
 
+def _status(yt: dict) -> dict:
+    """The video's privacy and made for kids, from the YouTube settings."""
+    return {"privacyStatus": yt.get("privacy") or "public", "selfDeclaredMadeForKids": bool(yt.get("made_for_kids"))}
+
+
 def _links(bid: str) -> dict:
     return {"id": bid, "watch_url": f"https://www.youtube.com/watch?v={bid}", "studio_url": f"https://studio.youtube.com/video/{bid}/livestreaming"}
 
@@ -334,8 +343,8 @@ def live_on_stream(creds: dict, stream_id: str) -> dict | None:
     token = _access_token(creds)
     found = None
     for status in ("active", "upcoming"):
-        items = _api("GET", "/liveBroadcasts", token, {"part": "id,status,contentDetails", "broadcastStatus": status,
-                                                       "broadcastType": "all", "maxResults": 25}).get("items") or []
+        items = _items(token, "/liveBroadcasts", {"part": "id,status,contentDetails", "broadcastStatus": status,
+                                                  "broadcastType": "all", "maxResults": 25})
         for item in items:
             if (item.get("contentDetails") or {}).get("boundStreamId") != stream_id:
                 continue
@@ -357,7 +366,7 @@ def start_broadcast(creds: dict, stream_id: str, yt: dict, title: str, descripti
     made = _api("POST", "/liveBroadcasts", token, {"part": "snippet,status,contentDetails"}, {
         "snippet": {"title": (title or "Live")[:100], "description": description or "",
                     "scheduledStartTime": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
-        "status": {"privacyStatus": yt.get("privacy") or "public", "selfDeclaredMadeForKids": bool(yt.get("made_for_kids"))},
+        "status": _status(yt),
         "contentDetails": {"enableAutoStart": yt.get("auto_start", True) is not False, "enableAutoStop": yt.get("auto_stop", True) is not False,
                            "enableDvr": yt.get("dvr", True) is not False, "latencyPreference": LATENCY.get(yt.get("latency"), "normal"),
                            "monitorStream": {"enableMonitorStream": False}},
@@ -376,7 +385,7 @@ def update_broadcast(creds: dict, broadcast_id: str, yt: dict, title: str, descr
     token = _access_token(creds)
     _api("PUT", "/videos", token, {"part": "snippet,status"}, {
         "id": broadcast_id, "snippet": _video_snippet(yt, title, description),
-        "status": {"privacyStatus": yt.get("privacy") or "public", "selfDeclaredMadeForKids": bool(yt.get("made_for_kids"))},
+        "status": _status(yt),
     })
 
 
@@ -388,7 +397,7 @@ def end_broadcast(creds: dict, broadcast_id: str) -> None:
         _api("POST", "/liveBroadcasts/transition", token, {"broadcastStatus": "complete", "id": broadcast_id, "part": "status"})
     except YouTubeError:
         try:
-            items = _api("GET", "/liveBroadcasts", token, {"part": "status", "id": broadcast_id}).get("items") or []
+            items = _items(token, "/liveBroadcasts", {"part": "status", "id": broadcast_id})
             life = ((items[0].get("status") or {}).get("lifeCycleStatus") if items else None) or ""
             if life in ("created", "ready", "testStarting", "testing"):
                 _api("DELETE", "/liveBroadcasts", token, {"id": broadcast_id})
@@ -401,16 +410,16 @@ def health(creds: dict, stream_id: str, broadcast_id: str | None) -> dict:
     bad | noData, issues: [YouTube's own warnings], viewers: watching now (None while not live)}."""
     token = _access_token(creds)
     out = {"state": None, "health": None, "issues": [], "viewers": None}
-    streams = _api("GET", "/liveStreams", token, {"part": "status", "id": stream_id}).get("items") or []
+    streams = _items(token, "/liveStreams", {"part": "status", "id": stream_id})
     if streams:
         h = (streams[0].get("status") or {}).get("healthStatus") or {}
         out["health"] = h.get("status")
         out["issues"] = [i.get("description") or i.get("reason") or i.get("type") for i in h.get("configurationIssues") or []
                          if (i.get("severity") or "") in ("error", "warning")][:5]
     if broadcast_id:
-        items = _api("GET", "/liveBroadcasts", token, {"part": "status", "id": broadcast_id}).get("items") or []
+        items = _items(token, "/liveBroadcasts", {"part": "status", "id": broadcast_id})
         out["state"] = ((items[0].get("status") or {}).get("lifeCycleStatus")) if items else "gone"
-        videos = _api("GET", "/videos", token, {"part": "liveStreamingDetails", "id": broadcast_id}).get("items") or []
+        videos = _items(token, "/videos", {"part": "liveStreamingDetails", "id": broadcast_id})
         viewers = ((videos[0].get("liveStreamingDetails") or {}).get("concurrentViewers")) if videos else None
         out["viewers"] = int(viewers) if viewers is not None and str(viewers).isdigit() else None
     return out

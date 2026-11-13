@@ -9,15 +9,22 @@ import { timeZone } from "./api/client.js";
 // and kept by the plugin.
 const length = (s) => (s < 60 ? `${s} s` : s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s / 60} min`);
 const size = (bytes) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} kB`);
-// A length as typed: seconds ("45", "45 s"), minutes and seconds ("2:30", "2 min 30 s", "2m30s") or minutes ("3 min");
-// null when it isn't one
+// A length as typed: seconds ("45", "45 s"), minutes and seconds ("2:30", "2 min 30 s", "2m30s") or minutes ("3 min",
+// "1.5 min"); null when it isn't one
+const SEC = "(?:s|secs?|seconds?)";
+const MIN = "(?:m|mins?|minutes?)";
+const FORMS = [
+  [new RegExp(String.raw`^(\d+)\s*${SEC}?$`), (m) => Number(m[1])],
+  [/^(\d+):([0-5]\d)$/, (m) => Number(m[1]) * 60 + Number(m[2])],
+  [new RegExp(String.raw`^(\d+(?:\.\d+)?)\s*${MIN}$`), (m) => Math.round(Number(m[1]) * 60)],
+  [new RegExp(String.raw`^(\d+)\s*${MIN}\s*(\d+)\s*${SEC}?$`), (m) => Number(m[1]) * 60 + Number(m[2])],
+];
 export function parseLength(text) {
   const t = String(text).trim().toLowerCase().replace(/\s+/g, " ");
-  let m;
-  if ((m = t.match(/^(\d+)\s*(s|sec|secs|second|seconds)?$/))) return Number(m[1]);
-  if ((m = t.match(/^(\d+):([0-5]\d)$/))) return Number(m[1]) * 60 + Number(m[2]);
-  if ((m = t.match(/^(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes)$/))) return Math.round(Number(m[1]) * 60);
-  if ((m = t.match(/^(\d+)\s*(m|min|mins|minutes?)\s*(\d+)\s*(s|sec|secs|seconds?)?$/))) return Number(m[1]) * 60 + Number(m[3]);
+  for (const [form, seconds] of FORMS) {
+    const m = t.match(form);
+    if (m) return seconds(m);
+  }
   return null;
 }
 
@@ -37,6 +44,14 @@ export function ClipsPanel() {
   if (!clips) return null;
 
   const shown = clips.seconds;
+  const where = clips.folder.shownAs || clips.folder.path;
+  const problem = clips.folder.problem;
+  const nothing = clips.held <= 0;
+  const blocked = busy || !!problem || nothing;
+  const stopTyping = () => {
+    setTyped(null);
+    setWrong(null);
+  };
   const keep = async () => {
     if (typed === null) return;
     const s = parseLength(typed);
@@ -47,7 +62,7 @@ export function ClipsPanel() {
     setWrong(null);
     try {
       setClips(await setClipLength(s));
-      setTyped(null);
+      stopTyping();
     } catch (e) {
       setWrong(errorText(e));
     }
@@ -57,7 +72,7 @@ export function ClipsPanel() {
     setSaid(null);
     try {
       const got = await takeClip(timeZone);
-      setSaid({ text: `Saved “${got.name}” (${size(got.size)}) in ${clips.folder.shownAs || clips.folder.path}.`, tone: "good" });
+      setSaid({ text: `Saved “${got.name}” (${size(got.size)}) in ${where}.`, tone: "good" });
       await load();
     } catch (e) {
       setSaid({ text: errorText(e), tone: "bad" });
@@ -65,15 +80,13 @@ export function ClipsPanel() {
       setBusy(false);
     }
   };
-  const problem = clips.folder.problem;
-  const nothing = clips.held <= 0;
 
   return (
     <div data-testid="stream-clips" style={panelBox({ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 })}>
       <div style={uiText(13, c.heading, { fontWeight: 600 })}>Clips</div>
       <div style={uiText(12, c.textMuted, { lineHeight: 1.5 })}>
         Save the last stretch of what went to YouTube as a video file, in{" "}
-        <span style={{ color: c.textPrimary }}>{clips.folder.shownAs || clips.folder.path}</span>.
+        <span style={{ color: c.textPrimary }}>{where}</span>.
       </div>
       <label style={uiText(12, c.textMuted, { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" })}>
         Length
@@ -89,10 +102,7 @@ export function ClipsPanel() {
           onBlur={keep}
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
-            if (e.key === "Escape") {
-              setTyped(null);
-              setWrong(null);
-            }
+            if (e.key === "Escape") stopTyping();
           }}
           style={{ ...fieldBox(), width: 80 }}
           aria-label="How long a clip is, in seconds"
@@ -108,8 +118,8 @@ export function ClipsPanel() {
           type="button"
           data-testid="stream-clip-save"
           onClick={take}
-          disabled={busy || !!problem || nothing}
-          style={primaryButton(busy || !!problem || nothing)}
+          disabled={blocked}
+          style={primaryButton(blocked)}
           title={problem || (nothing ? "Go live first: a clip is taken from what has gone to YouTube" : `Save the last ${length(shown)} that went to YouTube`)}
         >
           {busy ? "Saving the clip…" : `Save clip (last ${length(shown)})`}

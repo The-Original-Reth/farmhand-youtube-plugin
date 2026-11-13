@@ -10,10 +10,11 @@ from ..store import Store
 
 from .. import app_settings
 from .fonts import DEFAULT_FONT, FONTS
-from .constants import DEFAULT_TEXT_COLOR
-from .constants import CATEGORIES, DELAY, LATENCIES, PRIVACIES, TAGS_MAX, YOUTUBE_DEFAULTS
-from .constants import HOLDING_DEFAULTS, HOLDING_TEXT_MAX
-from .constants import CAMERA_KEY, COLOR, DEFAULT_BACKGROUND, DEFAULT_BORDER, DEFAULT_DESTINATION, DEFAULT_MUSIC_VOLUME, DEFAULT_RESOLUTION, DESCRIPTION_MAX, DESTINATIONS, KEY_SHAPE, LAYOUTS, MAX_CAMERAS, MAX_SIDE, RESOLUTIONS, SAVED, SECONDS, SETTINGS_KEY, STREAM_KEY_KEY, TITLE_MAX
+from . import youtube_choices
+from .constants import (CAMERA_KEY, COLOR, DEFAULT_BACKGROUND, DEFAULT_BORDER, DEFAULT_DESTINATION, DEFAULT_MUSIC_VOLUME,
+                        DEFAULT_RESOLUTION, DEFAULT_TEXT_COLOR, DELAY, DESCRIPTION_MAX, DESTINATIONS, HOLDING_DEFAULTS,
+                        HOLDING_TEXT_MAX, KEY_SHAPE, LAYOUTS, MAX_CAMERAS, MAX_SIDE, RESOLUTIONS, SAVED, SECONDS,
+                        SETTINGS_KEY, STREAM_KEY_KEY, TITLE_MAX)
 from .squares import MAX_LAYERS, SLIDE_SECONDS, TEXT_MAX, _cell, _color, _named
 
 # the stream's own colours, as a refusal names them
@@ -36,12 +37,11 @@ def _holding(raw) -> dict:
     """The holding screen as kept (anything missing or not usable: its default). See HOLDING_DEFAULTS."""
     raw = raw if isinstance(raw, dict) else {}
     text = raw.get("text") if isinstance(raw.get("text"), str) else HOLDING_DEFAULTS["text"]
-    colour = lambda v: v.upper() if isinstance(v, str) and COLOR.match(v) else None  # noqa: E731
     return {
         "text": text[:HOLDING_TEXT_MAX],
         "image": _named(raw.get("image")),
-        "background": colour(raw.get("background")),
-        "color": colour(raw.get("color")),
+        "background": _color(raw.get("background"), None),
+        "color": _color(raw.get("color"), None),
         "font": raw.get("font") if raw.get("font") in FONTS else None,
     }
 
@@ -71,54 +71,6 @@ def _check_holding(sent, now: dict) -> dict:
     return out
 
 
-def _youtube(raw) -> dict:
-    """The video's YouTube settings as kept (anything missing or not one of the choices: its default)."""
-    raw = raw if isinstance(raw, dict) else {}
-    tags = [t.strip() for t in raw.get("tags") or [] if isinstance(t, str) and t.strip()] if isinstance(raw.get("tags"), list) else []
-    return {
-        "privacy": raw.get("privacy") if raw.get("privacy") in PRIVACIES else YOUTUBE_DEFAULTS["privacy"],
-        "tags": list(dict.fromkeys(tags)),
-        "category": raw.get("category") if raw.get("category") in CATEGORIES else YOUTUBE_DEFAULTS["category"],
-        "made_for_kids": raw.get("made_for_kids") is True,
-        "latency": raw.get("latency") if raw.get("latency") in LATENCIES else YOUTUBE_DEFAULTS["latency"],
-        "dvr": raw.get("dvr") is not False,
-        "auto_start": raw.get("auto_start") is not False,
-        "auto_stop": raw.get("auto_stop") is not False,
-    }
-
-
-def _check_youtube(sent: dict, now: dict) -> dict:
-    """The video's YouTube settings as sent (only what's sent changes), checked: ValueError says what's wrong."""
-    if not isinstance(sent, dict):
-        raise ValueError("The YouTube settings didn't come through.")
-    out = dict(now)
-    if sent.get("privacy") is not None:
-        if sent["privacy"] not in PRIVACIES:
-            raise ValueError("Choose public, unlisted or private.")
-        out["privacy"] = sent["privacy"]
-    if sent.get("latency") is not None:
-        if sent["latency"] not in LATENCIES:
-            raise ValueError("Choose normal, low or ultra-low latency.")
-        out["latency"] = sent["latency"]
-    if sent.get("category") is not None:
-        if sent["category"] not in CATEGORIES:
-            raise ValueError("Choose one of the categories listed.")
-        out["category"] = sent["category"]
-    if sent.get("tags") is not None:
-        if not isinstance(sent["tags"], list) or not all(isinstance(t, str) for t in sent["tags"]):
-            raise ValueError("The tags didn't come through.")
-        tags = list(dict.fromkeys(t.strip() for t in sent["tags"] if t.strip()))
-        if any(c in t for t in tags for c in "<>"):
-            raise ValueError("YouTube doesn't allow < or > in a tag.")
-        if len(",".join(tags)) > TAGS_MAX:
-            raise ValueError(f"YouTube allows {TAGS_MAX} characters of tags; these come to {len(','.join(tags))}.")
-        out["tags"] = tags
-    for name in ("made_for_kids", "dvr", "auto_start", "auto_stop"):
-        if sent.get(name) is not None:
-            out[name] = bool(sent[name])
-    return out
-
-
 def _volume(v) -> bool:
     return type(v) is int and 0 <= v <= 100
 
@@ -145,7 +97,7 @@ def settings(db: Store) -> dict:
     streams), music: the stream folder's music played, starting with the stream (on unless turned off; False: a silent
     sound track), music_volume (0 to 100), music_shuffle: each round in a new order (False: in name order), title,
     description, key_set, delay: seconds the stream is held before YouTube gets it (0 to 120), so a stall shorter than
-    that never reaches it, youtube: the video's own YouTube settings (_youtube: privacy, tags, category, made_for_kids,
+    that never reaches it, youtube: the video's own YouTube settings (youtube_choices.kept: privacy, tags, category, made_for_kids,
     latency, dvr, auto_start, auto_stop), key_from_youtube: Farmhand has a stream of its own on the channel, so its key
     comes from YouTube}.
     The key itself is never given. Settings from before the grid (a list of cameras) come back as the grid they made.
@@ -181,22 +133,13 @@ def settings(db: Store) -> dict:
         "music_volume": raw["music_volume"] if _volume(raw.get("music_volume")) else DEFAULT_MUSIC_VOLUME,
         "music_shuffle": raw.get("music_shuffle", True) is not False,
         "delay": raw["delay"] if type(raw.get("delay")) is int and DELAY[0] <= raw["delay"] <= DELAY[1] else DELAY[2],
-        "youtube": _youtube(raw.get("youtube")),
+        "youtube": youtube_choices.kept(raw.get("youtube")),
         "holding": _holding(raw.get("holding")),
         "title": text("title"),
         "description": text("description"),
         "key_set": bool(app_settings.get(db, STREAM_KEY_KEY)),
         "key_from_youtube": bool(app_settings.get(db, "youtube_stream_id")),
     }
-
-
-def _youtube_text(text: str, most: int, what: str) -> str:
-    text = text.strip()
-    if len(text) > most:
-        raise ValueError(f"YouTube allows a {what} of up to {most} characters; this one has {len(text)}.")
-    if "<" in text or ">" in text:
-        raise ValueError(f"YouTube doesn't allow < or > in a {what}.")
-    return text
 
 
 def check_cells(db: Store, cols, rows, cells) -> list[dict | None]:
@@ -278,21 +221,16 @@ def save(db: Store, *, destination=None, chosen=None, show_status=None, stream_k
             raise ValueError(f"A stream can show up to {MAX_CAMERAS} cameras at once.")
         now["cols"], now["rows"] = auto_grid(len(keys))
         now["cells"] = [{"camera": k} for k in keys] + [None] * (now["cols"] * now["rows"] - len(keys))
-    if show_status is not None:
-        now["show_status"] = bool(show_status)
     for name, value in (("border_color", border_color), ("color", color), ("background", background)):
         if value is not None:
             if not isinstance(value, str) or not COLOR.match(value):
                 raise ValueError(f"Choose {COLOURS[name]} with the colour picker (#RRGGBB).")
             now[name] = value.upper()
-    if enabled is not None:
-        now["enabled"] = bool(enabled)
-    if music is not None:
-        now["music"] = bool(music)
-    if music_shuffle is not None:
-        now["music_shuffle"] = bool(music_shuffle)
+    for name, value in (("show_status", show_status), ("enabled", enabled), ("music", music), ("music_shuffle", music_shuffle)):
+        if value is not None:
+            now[name] = bool(value)
     if youtube is not None:
-        now["youtube"] = _check_youtube(youtube, now["youtube"])
+        now["youtube"] = youtube_choices.checked(youtube, now["youtube"])
     if holding is not None:
         now["holding"] = _check_holding(holding, now["holding"])
     if delay is not None:
@@ -323,9 +261,9 @@ def save(db: Store, *, destination=None, chosen=None, show_status=None, stream_k
                 raise ValueError(f"The time for {what} has to be from {least} to {most} seconds.")
             now[name] = value
     if title is not None:
-        now["title"] = _youtube_text(title, TITLE_MAX, "title")
+        now["title"] = youtube_choices.text(title, TITLE_MAX, "title")
     if description is not None:
-        now["description"] = _youtube_text(description, DESCRIPTION_MAX, "description")
+        now["description"] = youtube_choices.text(description, DESCRIPTION_MAX, "description")
     if clear_key:
         app_settings.put(db, STREAM_KEY_KEY, None)
     elif stream_key is not None and stream_key.strip():

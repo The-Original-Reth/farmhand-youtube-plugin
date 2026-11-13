@@ -27,7 +27,7 @@ class Buffer:
     less the one before's), and the held total is the sum. A step back or a leap (over JUMP: a layout's hand-over, whose
     new picture's times start a little behind the old one's) adds nothing, as the sender plays straight on over it."""
 
-    def __init__(self, delay: float):
+    def __init__(self, delay: float, sent=None):
         self.delay = max(0.0, float(delay))
         self._cond = threading.Condition()
         self._chunks: collections.deque[tuple[float, bytes, float]] = collections.deque()  # (when it came, data, stream it adds)
@@ -38,7 +38,7 @@ class Buffer:
         self._first: float | None = None
         self._ended = False
         self._filler = None  # while filling: what the sender is given meanwhile (the holding screen's ffmpeg), or None
-        self.sent = None  # told each piece the sender has taken (what YouTube is given: kept for clips, clips.py), or None
+        self.sent = sent  # told each piece the sender has taken (what YouTube is given: kept for clips, clips.py), or None
         threading.Thread(target=self._feed, name="stream-buffer", daemon=True).start()
 
     def fill_from(self, proc) -> None:

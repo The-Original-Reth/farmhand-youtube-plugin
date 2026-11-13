@@ -24,10 +24,12 @@ Signed in to YouTube, the plugin makes, changes, watches and ends the broadcast 
 from __future__ import annotations
 
 # What the rest of the plugin uses. The package, file by file: constants (what the stream can be), fonts, squares (a
-# square's choices, checked), choices (the stream's settings, kept and checked), sources (how ffmpeg reads each
-# camera), frame (the picture's sizes), cards (a card's square), words (the words on the cameras), picture (the whole
-# ffmpeg command), music (the music, fed to ffmpeg as it plays), encoders (processor or NVIDIA card), staging (the files going live puts out for ffmpeg), feeders (each
-# camera's reader, and the "Camera down" square), runner (the stream itself).
+# square's choices, checked), choices (the stream's settings, kept and checked; youtube_choices the video's own),
+# sources (how ffmpeg reads each camera), frame (the picture's sizes), cards (a card's square), words (the words on the
+# cameras), picture (the whole ffmpeg command), music (the music, fed to ffmpeg as it plays), encoders (processor or
+# NVIDIA card), staging (the files going live puts out for ffmpeg), feeders (each camera's reader), down_square (its
+# "Camera down" square), pump (the picture's steady camera pipes), layout_picture (a layout's picture made ready),
+# holding (the holding screen), clips (what went to YouTube, kept for clips), runner (the stream itself).
 from ..store import Store
 
 from . import broadcast, encoders, fonts, music, runner  # noqa: F401

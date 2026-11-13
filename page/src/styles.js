@@ -18,12 +18,6 @@ export const headerButton = () => ({
   textDecoration: "none", boxSizing: "border-box",
 });
 
-// An outlined button with an icon and a label, as on the page toolbars: small (12) or regular (13)
-export const toolButton = (size = 12, extra) => ({
-  display: "flex", alignItems: "center", gap: 6, ...ui, fontSize: fs(size), background: "none", color: c.textMuted,
-  border: `1px solid ${c.border}`, borderRadius: 4, padding: size === 13 ? "7px 12px" : "5px 10px", cursor: "pointer", ...extra,
-});
-
 // A dialog's buttons: Cancel, and the amber one that does it (dimmed while it can't)
 export const cancelButton = (busy = false) => ({
   ...ui, fontSize: fs(13), background: "none", color: c.textMuted, border: `1px solid ${c.border}`, borderRadius: 3,
@@ -36,14 +30,6 @@ export const primaryButton = (disabled = false) => ({
 
 // A section's box on a page (a card, a list, a folding section's body), with anything more in `extra`
 export const panelBox = (extra) => ({ border: `1px solid ${c.border}`, borderRadius: 4, background: c.panel, ...extra });
-// The heading row of a section that folds away: its toggle on the left, its buttons on the right
-export const foldHeading = (open) => ({
-  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: open ? 10 : 0, flexWrap: "wrap",
-});
-
-// a status line's colour by its tone: "warn" (something to look at), "good" (it went through), anything else faint
-export const toneColor = (tone) => (tone === "warn" ? c.amber : tone === "good" ? c.green : c.textFaint);
-
 // Amber underlined text that acts as a button ("Clear search")
 export const linkButton = (size = 13) => ({
   ...ui, fontSize: fs(size), background: "none", border: "none", color: c.amber, textDecoration: "underline", cursor: "pointer", padding: 0,

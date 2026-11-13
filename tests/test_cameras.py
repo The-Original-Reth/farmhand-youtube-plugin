@@ -9,7 +9,8 @@ import importlib
 import pytest
 
 from streamer import farm
-from streamer.live_stream import feeders, pacing, procs
+from streamer.live_stream import down_square, feeders, pacing, procs
+from streamer.live_stream import pump as pumps
 
 # (the module itself: the package's own `sources` is the function of that name)
 sources_module = importlib.import_module("streamer.live_stream.sources")
@@ -65,9 +66,9 @@ def test_frames_are_cut_from_what_a_feeder_puts_out():
 
 
 def test_the_camera_down_square_is_drawn_at_the_cameras_size():
-    frame = feeders.down_frame((320, 240), "#112233", "/no/such/font.ttf", "#FFFFFF", "VT 1190")
+    frame = down_square.down_frame((320, 240), "#112233", "/no/such/font.ttf", "#FFFFFF", "VT 1190")
     assert frame[:2] == b"\xff\xd8" and feeders.jpeg_size(frame) == (320, 240)
-    downs = feeders.DownFrames("#112233", "/no/such/font.ttf", "#FFFFFF", "VT 1190")
+    downs = down_square.DownFrames("#112233", "/no/such/font.ttf", "#FFFFFF", "VT 1190")
     assert downs.at((64, 48)) is downs.at((64, 48))
 
 
@@ -124,8 +125,8 @@ def test_a_feeder_puts_out_each_picture_the_camera_sends_once():
 
 def _writes(feeder, comes, ticks):
     """What a writer takes at each of `ticks` steps, with `comes[i]` pictures arriving just before step i."""
-    downs = feeders.DownFrames("#000000", "/no/font.ttf", "#FFFFFF", "VT 1190")
-    pump, last, out = feeders.Pump([], []), None, []
+    downs = down_square.DownFrames("#000000", "/no/font.ttf", "#FFFFFF", "VT 1190")
+    pump, last, out = pumps.Pump([], []), None, []
     for i in range(ticks):
         for _ in range(comes[i] if i < len(comes) else 0):
             feeder.picture += 1
@@ -161,8 +162,8 @@ def test_two_pictures_reading_one_camera_each_get_every_picture():
     """While one layout hands over to the next, two picture ffmpegs read the same feeders: neither takes pictures from
     the other."""
     f = _feeder()
-    downs = feeders.DownFrames("#000000", "/no/font.ttf", "#FFFFFF", "VT 1190")
-    pump, a, b, seen_a, seen_b = feeders.Pump([], []), None, None, [], []
+    downs = down_square.DownFrames("#000000", "/no/font.ttf", "#FFFFFF", "VT 1190")
+    pump, a, b, seen_a, seen_b = pumps.Pump([], []), None, None, [], []
     for i in range(1, 6):
         f._keep(jpeg((i, 0, 0)) + bytes([i]))
         _, a = pump.frame_for(f, downs, a)
@@ -175,8 +176,8 @@ def test_two_pictures_reading_one_camera_each_get_every_picture():
 def test_a_pump_writes_the_latest_frame_or_camera_down_steadily(ffmpeg, tmp_path, monkeypatch):
     monkeypatch.setattr(feeders, "DOWN_AFTER", 0.3)
     f = feeders.Feeder("ffmpeg", "1:Bed", [], [], (1280, 720), ffmpeg, aspect="16:9")  # no address: always down
-    downs = feeders.DownFrames("#000000", "/no/font.ttf", "#FFFFFF", "VT 1190")
-    pump = feeders.Pump([(f, downs)], [str(tmp_path / "cam.mjpeg")])
+    downs = down_square.DownFrames("#000000", "/no/font.ttf", "#FFFFFF", "VT 1190")
+    pump = pumps.Pump([(f, downs)], [str(tmp_path / "cam.mjpeg")])
     assert feeders.jpeg_size(pump.frame_for(f, downs)[0]) == (1280, 720)
     pump.start()
     try:

@@ -35,14 +35,6 @@ def _root() -> Path:
     return Path(config.settings.media_dir)
 
 
-def location_info(db: Store) -> dict:
-    """{path, shown_as, status: {exists, writable, ready}}: the folder the plugin was given (STREAM_FOLDER)."""
-    root = _root()
-    writable = root.is_dir() and os.access(root, os.W_OK)
-    return {"path": str(root), "shown_as": config.settings.media_shown_as,
-            "status": {"exists": root.is_dir(), "writable": writable, "ready": writable}}
-
-
 def folder(db: Store, make: bool = False) -> Path:
     """The stream folder, while it can be used (StorageUnavailableError otherwise); with `make`, its folders made."""
     root = _root()
@@ -51,10 +43,22 @@ def folder(db: Store, make: bool = False) -> Path:
             f"The stream folder ({root}) isn't there. Give the plugin's container a folder for its pictures and music "
             "(a bind mount or a NAS share mounted on its machine, at /media): see the plugin's README.")
     if make:
-        (root / IMAGES).mkdir(parents=True, exist_ok=True)
-        (root / SLIDESHOWS).mkdir(parents=True, exist_ok=True)
-        (root / MUSIC).mkdir(parents=True, exist_ok=True)
+        for d in (IMAGES, SLIDESHOWS, MUSIC):
+            (root / d).mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _slideshow_dir(db: Store, name: str, must_be_there: bool = False) -> Path:
+    """A slideshow's folder; with `must_be_there`, NotFound when it isn't."""
+    d = folder(db) / SLIDESHOWS / _name(name, "slideshow")
+    if must_be_there and not d.is_dir():
+        raise NotFound("That slideshow isn't there.")
+    return d
+
+
+def _pictures_dir(root: Path, slideshow: str | None) -> Path:
+    """Where a picture is: the single pictures (`slideshow` None), or a slideshow's folder."""
+    return root / IMAGES if slideshow is None else root / SLIDESHOWS / _name(slideshow, "slideshow")
 
 
 def _natural(name: str):
@@ -86,6 +90,10 @@ def is_blank(name) -> bool:
     return isinstance(name, str) and name.startswith(BLANK)
 
 
+def _write_order(d: Path, names: list[str]) -> None:
+    storage.write_text_atomically(d / ORDER_FILE, json.dumps(names, ensure_ascii=False))
+
+
 def _slides_in(d: Path) -> list[str]:
     """A slideshow's pictures in its own order."""
     names = _pictures_in(d)
@@ -103,35 +111,26 @@ def _slides_in(d: Path) -> list[str]:
 def set_order(db: Store, name: str, order: list[str]) -> list[str]:
     """Put a slideshow's pictures in this order (its pictures' names; any left out keep their place after these).
     ValueError for a name that isn't one of its pictures. Its order, as now kept."""
-    d = folder(db) / SLIDESHOWS / _name(name, "slideshow")
-    if not d.is_dir():
-        raise NotFound("That slideshow isn't there.")
+    d = _slideshow_dir(db, name, must_be_there=True)
     have = set(_slides_in(d))  # its pictures and blank screens
     missing = [n for n in order if n not in have]
     if missing:
         raise ValueError(f"“{missing[0]}” isn't one of the slideshow's pictures (Scan folder, and try again).")
     keep = list(dict.fromkeys(order)) + [n for n in _slides_in(d) if n not in set(order)]
-    storage.write_text_atomically(d / ORDER_FILE, json.dumps(keep, ensure_ascii=False))
+    _write_order(d, keep)
     forget()
     return keep
 
 
 def add_blank(db: Store, name: str) -> str:
     """A new blank screen at the end of a slideshow: its name in the order ("blank:3")."""
-    d = folder(db) / SLIDESHOWS / _name(name, "slideshow")
-    if not d.is_dir():
-        raise NotFound("That slideshow isn't there.")
+    d = _slideshow_dir(db, name, must_be_there=True)
     slides = _slides_in(d)
     numbers = [int(n[len(BLANK):]) for n in slides if is_blank(n) and n[len(BLANK):].isdigit()]
     blank = f"{BLANK}{max(numbers, default=0) + 1}"
-    storage.write_text_atomically(d / ORDER_FILE, json.dumps(slides + [blank], ensure_ascii=False))
+    _write_order(d, slides + [blank])
     forget()
     return blank
-
-
-def windows_path(db: Store, path: str) -> str | None:
-    """The stream folder as people reach it over the network, when the operator said (STREAM_FOLDER_SHOWN_AS)."""
-    return config.settings.media_shown_as
 
 
 # What was last found in the stream folder, and which folder that was. It's read again only when asked (Scan folder),
@@ -147,7 +146,8 @@ def forget() -> None:
 
 
 def media(db: Store, scan: bool = False) -> dict:
-    """{path, windows_path (windows_path(), or None), images: [names], slideshows: [{name, images: [names]}], music: [the
+    """{path, windows_path (the stream folder as people reach it over the network, when the operator said:
+    STREAM_FOLDER_SHOWN_AS; or None), images: [names], slideshows: [{name, images: [names]}], music: [the
     tracks' names], error}:
     what's in the stream folder, as last found (read now when `scan`, or the first time)."""
     global _found
@@ -166,8 +166,7 @@ def _read(db: Store) -> dict:
         except OSError:
             pass
     except storage.StorageUnavailableError as e:
-        at = location_info(db)["path"]
-        return {"path": at, "windows_path": windows_path(db, at), "images": [], "slideshows": [], "music": [], "error": str(e)}
+        return {"path": str(_root()), "windows_path": config.settings.media_shown_as, "images": [], "slideshows": [], "music": [], "error": str(e)}
     shows = []
     try:
         for e in sorted(os.scandir(root / SLIDESHOWS), key=lambda e: _natural(e.name)):
@@ -175,7 +174,7 @@ def _read(db: Store) -> dict:
                 shows.append({"name": e.name, "images": _slides_in(Path(e.path))})
     except OSError:
         pass
-    return {"path": str(root), "windows_path": windows_path(db, str(root)), "images": _pictures_in(root / IMAGES), "slideshows": shows,
+    return {"path": str(root), "windows_path": config.settings.media_shown_as, "images": _pictures_in(root / IMAGES), "slideshows": shows,
             "music": _files_in(root / MUSIC, TRACK_TYPES), "error": None}
 
 
@@ -196,20 +195,17 @@ def _picture_path(d: Path, name: str) -> Path:
 
 def picture(db: Store, slideshow: str | None, name: str) -> tuple[bytes, str]:
     """A picture's bytes and type: one of the single pictures, or one in a slideshow. NotFound when it isn't there."""
-    root = folder(db)
-    d = root / IMAGES if slideshow is None else root / SLIDESHOWS / _name(slideshow, "slideshow")
-    path = _picture_path(d, name)
+    path = picture_path(db, slideshow, name)
     return path.read_bytes(), PICTURE_TYPES[path.suffix.lower()]
 
 
 def picture_path(db: Store, slideshow: str | None, name: str) -> Path:
-    root = folder(db)
-    return _picture_path(root / IMAGES if slideshow is None else root / SLIDESHOWS / _name(slideshow, "slideshow"), name)
+    return _picture_path(_pictures_dir(folder(db), slideshow), name)
 
 
 def slideshow_paths(db: Store, name: str) -> list[Path]:
     """A slideshow's pictures, in its own order ([] for one that isn't there); a blank screen as its name ("blank:1")."""
-    d = folder(db) / SLIDESHOWS / _name(name, "slideshow")
+    d = _slideshow_dir(db, name)
     return [n if is_blank(n) else d / n for n in _slides_in(d)]
 
 
@@ -236,8 +232,7 @@ def _free_name(d: Path, name: str) -> str:
 def add_picture(db: Store, slideshow: str | None, filename: str, data: bytes) -> str:
     """Write an uploaded picture into the single pictures, or into a slideshow (made when it isn't there): its name."""
     name = _check_picture(filename, data)
-    root = folder(db, make=True)
-    d = root / IMAGES if slideshow is None else root / SLIDESHOWS / _name(slideshow, "slideshow")
+    d = _pictures_dir(folder(db, make=True), slideshow)
     d.mkdir(parents=True, exist_ok=True)
     name = _free_name(d, name)
     storage.write_bytes_atomically(d / name, data)
@@ -247,11 +242,11 @@ def add_picture(db: Store, slideshow: str | None, filename: str, data: bytes) ->
 
 def remove_picture(db: Store, slideshow: str | None, name: str) -> None:
     if slideshow and is_blank(name):  # a blank screen: taken out of the order (it has no file)
-        d = folder(db) / SLIDESHOWS / _name(slideshow, "slideshow")
+        d = _slideshow_dir(db, slideshow)
         slides = _slides_in(d)
         if name not in slides:
             raise NotFound("That blank screen isn't there.")
-        storage.write_text_atomically(d / ORDER_FILE, json.dumps([n for n in slides if n != name], ensure_ascii=False))
+        _write_order(d, [n for n in slides if n != name])
     else:
         picture_path(db, slideshow, name).unlink()
     forget()
@@ -289,9 +284,7 @@ def rename_slideshow(db: Store, name: str, new: str) -> str:
 
 def remove_slideshow(db: Store, name: str) -> None:
     """Delete a slideshow: its pictures, then its folder, which is only removed once nothing else is left in it."""
-    d = folder(db) / SLIDESHOWS / _name(name, "slideshow")
-    if not d.is_dir():
-        raise NotFound("That slideshow isn't there.")
+    d = _slideshow_dir(db, name, must_be_there=True)
     for n in _pictures_in(d):
         (d / n).unlink(missing_ok=True)
     (d / ORDER_FILE).unlink(missing_ok=True)  # Farmhand's own: its order
