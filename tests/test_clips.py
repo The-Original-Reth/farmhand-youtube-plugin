@@ -1,0 +1,184 @@
+"""
+Clips: what went to YouTube kept for five minutes and a little more, and the last 5 seconds to 5 minutes of it saved
+as an MP4 in the clips folder, starting at a whole frame (live_stream/clips.py, clip_routes.py).
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from streamer import config
+from streamer.live_stream import buffer as buffer_module
+from streamer.live_stream import clips
+
+from .conftest import wait_until
+from .fake_ffmpeg import _keyframe_packet, frame_at
+
+KEY = _keyframe_packet()
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def _second(clock, recent, key: bool):
+    """One second of stream going out: a keyframe's packet first when `key`, then a plain frame."""
+    recent.add((KEY if key else b"") + frame_at(clock.now))
+    clock.now += 1
+
+
+def test_what_went_to_youtube_is_kept_five_minutes_and_a_little_more():
+    clock = Clock()
+    recent = clips.Recent(clock=clock)
+    assert recent.held() == 0 and recent.last(30) == (b"", 0.0)
+    for s in range(400):
+        _second(clock, recent, key=s % 2 == 0)
+    assert recent.held() == pytest.approx(clips.MOST_SECONDS + clips.EXTRA, abs=1)
+
+
+def test_a_clip_starts_at_the_whole_frame_at_or_just_before_the_time_asked_for():
+    clock = Clock()
+    recent = clips.Recent(clock=clock)
+    for s in range(60):
+        _second(clock, recent, key=s % 2 == 0)  # a keyframe every 2 s
+    data, seconds = recent.last(5)  # (5 s back is an odd second: the keyframe a second before it)
+    assert data.startswith(KEY) and seconds == 6
+    data, seconds = recent.last(6)
+    assert data.startswith(KEY) and seconds == 6
+    data, seconds = recent.last(1000)  # longer than what's kept: all of it
+    assert seconds == 60 and data.startswith(KEY)
+
+
+def test_a_clip_with_no_whole_frame_before_starts_at_the_first_after():
+    clock = Clock()
+    recent = clips.Recent(clock=clock)
+    for s in range(10):
+        _second(clock, recent, key=s == 7)
+    data, seconds = recent.last(8)
+    assert data.startswith(KEY) and seconds == 3
+
+
+def test_what_the_sender_takes_is_kept_for_clips():
+    class Sink:
+        def __init__(self):
+            self.got = []
+
+        def write(self, data):
+            self.got.append(data)
+
+        def flush(self):
+            pass
+
+    kept = []
+    b = buffer_module.Buffer(0)
+    b.sent = kept.append
+    sink = Sink()
+    b.set_sink(sink)
+    b.write(KEY + frame_at(1.0))
+    b.write(frame_at(2.0))
+    try:
+        assert wait_until(lambda: len(kept) == 2)
+        assert kept == sink.got
+    finally:
+        b.close()
+
+
+# ------------------------------------------------------------------ saving them
+
+
+def _ffmpeg_makes_an_mp4(calls):
+    def run(args, capture_output=True, timeout=None):
+        calls.append(args)
+        Path(args[-1]).write_bytes(b"....ftypisom" + Path(args[args.index("-i") + 1]).read_bytes())
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+    return run
+
+
+@pytest.fixture()
+def kept(monkeypatch):
+    clock = Clock()
+    recent = clips.Recent(clock=clock)
+    monkeypatch.setattr(clips, "recent", recent)
+    for s in range(120):
+        _second(clock, recent, key=s % 2 == 0)
+    return recent
+
+
+def test_a_clip_is_saved_whole_in_the_clips_folder_named_for_when(tmp_path, kept):
+    calls = []
+    got = clips.save("ffmpeg", tmp_path, 30, "America/New_York", run=_ffmpeg_makes_an_mp4(calls))
+    assert got["seconds"] == 30 and got["size"] > 0
+    assert clips.NAME.match(got["name"]) and got["name"].endswith(" (30 s).mp4")
+    assert [p.name for p in tmp_path.iterdir()] == [got["name"]]  # (no .part or .ts left behind)
+    args = calls[0]
+    assert args[args.index("-c") + 1] == "copy" and "+faststart" in args and args[-1].endswith(".part")
+    # one taken the same second gets a number
+    again = clips.save("ffmpeg", tmp_path, 30, "America/New_York", run=_ffmpeg_makes_an_mp4(calls))
+    assert again["name"] != got["name"]
+    assert [c["name"] for c in clips.listed(tmp_path)][0] in (got["name"], again["name"])
+
+
+def test_a_clip_that_cant_be_saved_says_why(tmp_path, kept, monkeypatch):
+    with pytest.raises(ValueError, match="no clips folder"):
+        clips.save("ffmpeg", tmp_path / "nowhere", 30)
+    fails = lambda args, **kw: subprocess.CompletedProcess(args, 1, b"", b"Invalid data found when processing input\n")  # noqa: E731
+    with pytest.raises(ValueError, match="Invalid data"):
+        clips.save("ffmpeg", tmp_path, 30, run=fails)
+    assert list(tmp_path.iterdir()) == []  # (nothing half-made left)
+    kept.clear()
+    with pytest.raises(ValueError, match="Nothing has gone to YouTube yet"):
+        clips.save("ffmpeg", tmp_path, 30, run=_ffmpeg_makes_an_mp4([]))
+
+
+# ------------------------------------------------------------------ the page's API
+
+
+@pytest.fixture()
+def clips_api(api, tmp_path, monkeypatch, kept):
+    folder = tmp_path / "YouTube clips"
+    folder.mkdir()
+    monkeypatch.setattr(config.settings, "clips_dir", folder)
+    monkeypatch.setattr(config.settings, "clips_shown_as", r"\\nas\3d_Printing_Elves\Farmhand\YouTube clips")
+    from streamer.live_stream import procs
+    monkeypatch.setattr(procs, "ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(clips.subprocess, "run", _ffmpeg_makes_an_mp4([]))
+    return api, folder
+
+
+def test_the_page_sets_how_long_a_clip_is_and_takes_one(clips_api):
+    api, folder = clips_api
+    page = api.get("/api/clips").json()
+    assert page["seconds"] == 30 and (page["least"], page["most"]) == (5, 300) and page["held"] > 100
+    assert page["folder"] == {"path": str(folder), "shown_as": r"\\nas\3d_Printing_Elves\Farmhand\YouTube clips", "problem": None}
+    assert page["clips"] == []
+
+    assert api.put("/api/clips", json={"seconds": 4}).status_code == 422
+    assert api.put("/api/clips", json={"seconds": 301}).status_code == 422
+    assert api.put("/api/clips", json={"seconds": 90}).json()["seconds"] == 90
+
+    r = api.post("/api/clips", json={"tz": "America/New_York"})
+    assert r.status_code == 201 and r.json()["seconds"] == 90
+    name = r.json()["name"]
+    assert [c["name"] for c in api.get("/api/clips").json()["clips"]] == [name]
+    got = api.get(f"/api/clips/{name}")
+    assert got.status_code == 200 and got.headers["content-type"] == "video/mp4" and got.content.startswith(b"....ftyp")
+    assert api.post("/api/clips", json={"seconds": 5}).json()["seconds"] in (5, 6)  # (from the whole frame before)
+
+    assert api.get("/api/clips/..%2Fsettings.json").status_code == 404
+    assert api.get("/api/clips/not-a-clip.mp4").status_code == 404
+
+
+def test_no_clips_folder_is_said_on_the_page(clips_api, monkeypatch, tmp_path):
+    api, _ = clips_api
+    monkeypatch.setattr(config.settings, "clips_dir", tmp_path / "not-mounted")
+    page = api.get("/api/clips").json()
+    assert "no clips folder" in page["folder"]["problem"]
+    r = api.post("/api/clips", json={})
+    assert r.status_code == 409 and "no clips folder" in r.json()["detail"]

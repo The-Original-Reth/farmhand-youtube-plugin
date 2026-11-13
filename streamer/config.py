@@ -14,6 +14,9 @@ The rest are this plugin's own:
                              (a bind mount, or a NAS share mounted on the plugin's machine)
     STREAM_FOLDER_SHOWN_AS   optional: the same folder as people reach it over the network (a Windows share path,
                              say), shown on the page so they know where to copy pictures and music in by hand
+    STREAM_CLIPS             the clips folder, where Save clip writes MP4s: /clips, a folder the operator mounts in
+                             (the NAS's "YouTube clips" folder, beside the stream folder)
+    STREAM_CLIPS_SHOWN_AS    optional: the clips folder as people reach it over the network, shown on the page
     STREAM_TEST_DESTINATION  optional, for trying the plugin out: an rtmp:// address that takes the stream instead
                              of YouTube (the stream key pasted on the page goes on its end). While it's set, YouTube
                              is never sent anything, signed in or not
@@ -35,6 +38,8 @@ class Config:
     data_dir: Path = Path("/data")
     media_dir: Path = Path("/media")
     media_shown_as: str | None = None
+    clips_dir: Path = Path("/clips")
+    clips_shown_as: str | None = None
     test_destination: str | None = None
 
     @classmethod
@@ -46,6 +51,8 @@ class Config:
             data_dir=Path(env.get("STREAM_DATA", "/data")),
             media_dir=Path(env.get("STREAM_FOLDER", "/media")),
             media_shown_as=(env.get("STREAM_FOLDER_SHOWN_AS") or "").strip() or None,
+            clips_dir=Path(env.get("STREAM_CLIPS", "/clips")),
+            clips_shown_as=(env.get("STREAM_CLIPS_SHOWN_AS") or "").strip() or None,
             test_destination=(env.get("STREAM_TEST_DESTINATION") or "").strip().rstrip("/") or None,
         )
 

@@ -35,6 +35,8 @@ What it adds over the Stream page older Farmhands had built in:
 - **It reads only what it needs**: the cameras' addresses (`cameras:read`) and what each printer is printing
   (`prints:read`). It has no database: its settings, stream key, YouTube sign-in and saved layouts are in its own
   volume (`/data/settings.json`, readable only by the plugin), and its API never answers the key or the sign-in.
+- **Clips**: **Save clip** saves the last 5 seconds to 5 minutes (set on the page) of what went to YouTube as an MP4
+  in the NAS's YouTube clips folder (see [Clips](#clips)).
 - **Moving over from the old Stream page**: with `stream:migrate`, the first time it starts it brings over, once, what
   a Farmhand from before Stream became a plugin had set up on its Stream page: settings, saved layouts, stream key and
   YouTube sign-in. Farmhand keeps its copy in its database, unused.
@@ -45,6 +47,7 @@ What it adds over the Stream page older Farmhands had built in:
 | `streamer/live_stream/` | The engine (first copied from Farmhand's own, now gone); `feeders.py` reads each camera and draws the "Camera down" square |
 | `streamer/stream_media.py`, `youtube_live.py`, `routes.py` | The stream folder, YouTube sign-in and the page's API |
 | `streamer/store.py`, `farm.py`, `migrate.py`, `layouts.py`, `app.py` | The plugin's own: its settings file, reading Farmhand, the one-off move, saved layouts, the web server |
+| `streamer/live_stream/clips.py`, `streamer/clip_routes.py` | Clips: what went to YouTube kept five minutes, and saved as MP4s |
 | `page/` | The page (first copied from Farmhand's own Stream page), a small Vite build of its own (`npm run build` puts it in `streamer/web/`) |
 | `tests/` | Tests against stand-ins for Farmhand's plugin API and ffmpeg (`python -m pytest -q`) |
 
@@ -72,6 +75,23 @@ one was chosen), so the squares find their pictures:
 Pictures added on the page are written there; ones copied in by hand count too (press **Resync**). Set
 `STREAM_FOLDER_SHOWN_AS` to the folder as people reach it over the network (e.g. `\\nas\3d_Printing_Elves\Farmhand\stream`)
 and the page shows it, for copying files in by hand.
+
+## Clips
+
+**Save clip** on the page saves the last stretch of what went to YouTube as an MP4 in the clips folder. How long a clip
+is, from **5 seconds to 5 minutes**, is set with the slider beside it (kept by the plugin). The plugin keeps the last
+five minutes of what it has sent to YouTube (holding screen and all), so a clip is what viewers were given. It's copied
+as it is, with no compressing again, so saving costs almost nothing and loses nothing. It starts on the whole frame at
+or just before the time asked for (one comes every 2 seconds), and is named for when it was taken, in the page's time
+zone: `2026-11-12 18-26-03 (30 s).mp4`. It's written beside its final name and renamed once whole, so the folder never
+shows half a clip. The page lists the newest ten, to download.
+
+The clips folder is the one the container is given at `/clips`: on the farm, the NAS's **YouTube clips** folder, beside
+the stream folder. Mount it on the plugin's machine like the stream folder (e.g. in `/etc/fstab`,
+`//nas/3d_Printing_Elves/Farmhand/YouTube\040clips /mnt/youtube-clips cifs credentials=/root/.nas,uid=0,gid=0,iocharset=utf8 0 0`,
+where `\040` is the space in its name), then `- "/mnt/youtube-clips:/clips"` in the compose file. Set
+`STREAM_CLIPS_SHOWN_AS` to it as people reach it (`\\nas\3d_Printing_Elves\Farmhand\YouTube clips`) and the page says
+so. Without a folder there, the page says what's missing and the button waits.
 
 ## Run it
 
@@ -182,6 +202,8 @@ save a few seconds with `ffmpeg -i rtsp://192.168.10.215:8554/live/farmtest -t 1
 | `STREAM_DATA` | Its settings folder (`/data`: a volume) |
 | `STREAM_FOLDER` | The stream folder (`/media`: a mount) |
 | `STREAM_FOLDER_SHOWN_AS` | Optional: the stream folder as people reach it over the network, shown on the page |
+| `STREAM_CLIPS` | The clips folder (`/clips`: a mount), where Save clip puts its MP4s |
+| `STREAM_CLIPS_SHOWN_AS` | Optional: the clips folder as people reach it over the network, shown on the page |
 | `STREAM_TEST_DESTINATION` | Optional: an `rtmp://` address the stream goes to instead of YouTube |
 | `FARMHAND_STREAM_ENCODER` | `auto` (default), `nvenc` or `cpu` |
 

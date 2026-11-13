@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from ..store import Store, store
 from .. import app_settings, config, farm, stream_media, youtube_live
-from . import feeders, holding, music, procs, staging
+from . import clips, feeders, holding, music, procs, staging
 from .cameras import CamerasMixin
 from .pictures import PicturesMixin
 from .self_check import SelfCheckMixin
@@ -281,6 +281,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         # the music starts with the stream (when it's on and there are tracks; silence otherwise)
         player = music.Player(ffmpeg, tracks, on=chosen["music"], shuffle=chosen["music_shuffle"], volume=chosen["music_volume"])
         buffer = Buffer(chosen["delay"])
+        buffer.sent = clips.recent.add  # (what goes to YouTube, kept for clips)
         with self._lock:
             self._generation += 1
             gen = self._generation
