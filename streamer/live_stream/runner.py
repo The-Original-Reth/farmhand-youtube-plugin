@@ -32,6 +32,8 @@ from .fonts import font_file
 from .choices import settings
 from .encoders import encoder
 from .buffer import Buffer
+from .down_square import DownFrames
+from .pump import Pump, pipe_input
 from .relay import Relay
 from .sources import Source, sources
 from .picture import Look, command, sender_command, timetable
@@ -188,9 +190,9 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         fed = self._feed(ffmpeg, srcs, size)
         own_cells = {c["camera"]: c for c in chosen["cells"] if c and "camera" in c}
 
-        def looks(s) -> feeders.DownFrames:  # its "Camera down" square: its own colour and words' font and colour
+        def looks(s) -> DownFrames:  # its "Camera down" square: its own colour and words' font and colour
             mine = own_cells.get(s.key) or {}
-            return feeders.DownFrames(mine.get("background") or chosen["background"], font_file(mine.get("words_font") or chosen["font"]),
+            return DownFrames(mine.get("background") or chosen["background"], font_file(mine.get("words_font") or chosen["font"]),
                                       mine.get("words_color") or chosen["color"], s.name or s.label)
 
         downs = [looks(s) for s in srcs]
@@ -212,7 +214,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
 
         starts = [0]
 
-        def make(clock: float, offset: float) -> tuple[list[str], feeders.Pump]:
+        def make(clock: float, offset: float) -> tuple[list[str], Pump]:
             """The command for a picture ffmpeg starting now (`clock`: the time of day, so its slideshows and turns keep
             the page's; `offset`: the stream's age, its times' start), and the pump feeding it its cameras: its own pipes,
             so one starting beside the one going out never takes its frames."""
@@ -220,8 +222,8 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
                 write_atomically(turns_file, timetable(len(srcs), *cycle, clock=clock))
             starts[0] += 1
             paths = [os.path.join(folder, f"camera-{i}-{starts[0]}.mjpeg") for i in range(len(srcs))]
-            pump = feeders.Pump(list(zip(fed, downs)), paths)
-            piped = [Source(s.printer_id, s.label, feeders.pipe_input(p), [], key=s.key, name=s.name) for s, p in zip(srcs, paths)]
+            pump = Pump(list(zip(fed, downs)), paths)
+            piped = [Source(s.printer_id, s.label, pipe_input(p), [], key=s.key, name=s.name) for s, p in zip(srcs, paths)]
             return command(ffmpeg, piped, url, Look(encoder=enc, clock=clock,
                 status_files=files, cycle=cycle, turns_file=turns_file,
                 resolution=resolution, border_color=chosen["border_color"], background=chosen["background"], font=chosen["font"], color=chosen["color"], cols=chosen["cols"],
