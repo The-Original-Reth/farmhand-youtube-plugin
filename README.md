@@ -35,7 +35,7 @@ What it adds over the Stream page older Farmhands had built in:
 - **It reads only what it needs**: the cameras' addresses (`cameras:read`) and what each printer is printing
   (`prints:read`). It has no database: its settings, stream key, YouTube sign-in and saved layouts are in its own
   volume (`/data/settings.json`, readable only by the plugin), and its API never answers the key or the sign-in.
-- **Clips**: **Save clip** saves the last 5 seconds to 5 minutes (set on the page) of what went to YouTube as an MP4
+- **Clips**: **Save clip** saves the last 1 second to 5 minutes (set on the page) of what went to YouTube as an MP4
   in the NAS's YouTube clips folder (see [Clips](#clips)).
 - **Moving over from the old Stream page**: with `stream:migrate`, the first time it starts it brings over, once, what
   a Farmhand from before Stream became a plugin had set up on its Stream page: settings, saved layouts, stream key and
@@ -79,10 +79,12 @@ and the page shows it, for copying files in by hand.
 ## Clips
 
 **Save clip** on the page saves the last stretch of what went to YouTube as an MP4 in the clips folder. How long a clip
-is, from **5 seconds to 5 minutes**, is set with the slider beside it (kept by the plugin). The plugin keeps the last
+is, from **1 second to 5 minutes** (3 seconds unless changed), is typed in beside it (kept by the plugin): seconds
+(`45`, `90 s`), minutes and seconds (`2:30`) or minutes (`3 min`). The plugin keeps the last
 five minutes of what it has sent to YouTube (holding screen and all), so a clip is what viewers were given. It's copied
 as it is, with no compressing again, so saving costs almost nothing and loses nothing. It starts on the whole frame at
-or just before the time asked for (one comes every 2 seconds), and is named for when it was taken, in the page's time
+or just before the time asked for (one comes every 2 seconds), so a clip can be up to 2 seconds longer than asked
+(a 1 second clip comes out 1 to 3 seconds long), and is named for when it was taken, in the page's time
 zone: `2026-11-12 18-26-03 (30 s).mp4`. It's written beside its final name and renamed once whole, so the folder never
 shows half a clip. The page lists the newest ten, to download.
 

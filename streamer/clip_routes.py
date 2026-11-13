@@ -1,8 +1,8 @@
 """
-Clips: the last 5 seconds to 5 minutes of what went to YouTube, saved as MP4s in the clips folder (live_stream/clips.py).
+Clips: the last 1 second to 5 minutes of what went to YouTube, saved as MP4s in the clips folder (live_stream/clips.py).
 
     GET  /api/clips          {seconds, least, most, held, folder: {path, shown_as, problem}, clips: [{name, size, made}]}
-    PUT  /api/clips          {seconds}: how long a clip is (5 to 300)
+    PUT  /api/clips          {seconds}: how long a clip is (1 to 300)
     POST /api/clips          {seconds?, tz?}: save one now, {name, seconds, size}
     GET  /api/clips/{name}   one of the listed clips, to download
 """

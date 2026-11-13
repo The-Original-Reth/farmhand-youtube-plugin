@@ -1,21 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { c } from "./theme.js";
-import { panelBox, primaryButton, uiText } from "./styles.js";
+import { fieldBox, panelBox, primaryButton, uiText } from "./styles.js";
 import { clipUrl, errorText, getClips, setClipLength, takeClip } from "./api.js";
 import { timeZone } from "./api/client.js";
 
-// Clips: the last 5 seconds to 5 minutes of what went to YouTube, saved as an MP4 in the clips folder (the NAS's
-// "YouTube clips", beside the stream folder) at the press of a button. The length is set here and kept by the plugin.
+// Clips: the last 1 second to 5 minutes of what went to YouTube, saved as an MP4 in the clips folder (the NAS's
+// "YouTube clips", beside the stream folder) at the press of a button. The length is typed in here (1 s to 5 min)
+// and kept by the plugin.
 const length = (s) => (s < 60 ? `${s} s` : s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s / 60} min`);
 const size = (bytes) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} kB`);
-const STEPS = [5, 10, 15, 20, 30, 45, 60, 90, 120, 150, 180, 210, 240, 270, 300]; // (the slider's stops: 5 s to 5 min)
+// A length as typed: seconds ("45", "45 s"), minutes and seconds ("2:30", "2 min 30 s", "2m30s") or minutes ("3 min");
+// null when it isn't one
+export function parseLength(text) {
+  const t = String(text).trim().toLowerCase().replace(/\s+/g, " ");
+  let m;
+  if ((m = t.match(/^(\d+)\s*(s|sec|secs|second|seconds)?$/))) return Number(m[1]);
+  if ((m = t.match(/^(\d+):([0-5]\d)$/))) return Number(m[1]) * 60 + Number(m[2]);
+  if ((m = t.match(/^(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes)$/))) return Math.round(Number(m[1]) * 60);
+  if ((m = t.match(/^(\d+)\s*(m|min|mins|minutes?)\s*(\d+)\s*(s|sec|secs|seconds?)?$/))) return Number(m[1]) * 60 + Number(m[3]);
+  return null;
+}
 
 export function ClipsPanel() {
   const [clips, setClips] = useState(null);
-  const [seconds, setSeconds] = useState(null); // while the slider is moved, before it's saved
+  const [typed, setTyped] = useState(null); // what's in the box while it's being typed in, before it's saved
+  const [wrong, setWrong] = useState(null); // why what was typed isn't a length
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState(null); // { text, tone }
-  const saving = useRef(null);
 
   const load = () => getClips().then(setClips).catch((e) => setSaid({ text: errorText(e), tone: "bad" }));
   useEffect(() => {
@@ -25,19 +36,21 @@ export function ClipsPanel() {
   }, []);
   if (!clips) return null;
 
-  const shown = seconds ?? clips.seconds;
-  const step = Math.max(0, STEPS.findIndex((s) => s >= shown));
-  const choose = (s) => {
-    setSeconds(s);
-    clearTimeout(saving.current);
-    saving.current = setTimeout(() => {
-      setClipLength(s)
-        .then((r) => {
-          setClips(r);
-          setSeconds(null);
-        })
-        .catch((e) => setSaid({ text: errorText(e), tone: "bad" }));
-    }, 400);
+  const shown = clips.seconds;
+  const keep = async () => {
+    if (typed === null) return;
+    const s = parseLength(typed);
+    if (s === null || s < clips.least || s > clips.most) {
+      setWrong(`Type ${clips.least} second to ${clips.most / 60} minutes, e.g. 3, 45, 90 s, 2:30 or 3 min.`);
+      return;
+    }
+    setWrong(null);
+    try {
+      setClips(await setClipLength(s));
+      setTyped(null);
+    } catch (e) {
+      setWrong(errorText(e));
+    }
   };
   const take = async () => {
     setBusy(true);
@@ -66,17 +79,30 @@ export function ClipsPanel() {
         Length
         <input
           data-testid="stream-clip-length"
-          type="range"
-          min={0}
-          max={STEPS.length - 1}
-          step={1}
-          value={step}
-          onChange={(e) => choose(STEPS[Number(e.target.value)])}
-          style={{ flex: "1 1 160px", accentColor: c.amber }}
-          aria-label="How long a clip is"
+          type="text"
+          inputMode="numeric"
+          value={typed ?? String(shown)}
+          onChange={(e) => {
+            setTyped(e.target.value);
+            setWrong(null);
+          }}
+          onBlur={keep}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setTyped(null);
+              setWrong(null);
+            }
+          }}
+          style={{ ...fieldBox(), width: 80 }}
+          aria-label="How long a clip is, in seconds"
+          title="Seconds (1 to 300), or minutes and seconds like 2:30. Enter keeps it."
         />
-        <span style={uiText(12, c.textPrimary, { minWidth: 70 })}>{length(shown)}</span>
+        <span style={uiText(12, c.textFaint)}>
+          seconds{typed === null && shown >= 60 ? ` (${length(shown)})` : ""} · {clips.least} s to {clips.most / 60} min
+        </span>
       </label>
+      {wrong && <div style={uiText(12, c.danger, { lineHeight: 1.5 })}>{wrong}</div>}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button
           type="button"

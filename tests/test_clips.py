@@ -1,5 +1,5 @@
 """
-Clips: what went to YouTube kept for five minutes and a little more, and the last 5 seconds to 5 minutes of it saved
+Clips: what went to YouTube kept for five minutes and a little more, and the last 1 second to 5 minutes of it saved
 as an MP4 in the clips folder, starting at a whole frame (live_stream/clips.py, clip_routes.py).
 """
 from __future__ import annotations
@@ -155,11 +155,11 @@ def clips_api(api, tmp_path, monkeypatch, kept):
 def test_the_page_sets_how_long_a_clip_is_and_takes_one(clips_api):
     api, folder = clips_api
     page = api.get("/api/clips").json()
-    assert page["seconds"] == 30 and (page["least"], page["most"]) == (5, 300) and page["held"] > 100
+    assert page["seconds"] == 3 and (page["least"], page["most"]) == (1, 300) and page["held"] > 100  # (3 s unless changed)
     assert page["folder"] == {"path": str(folder), "shown_as": r"\\nas\3d_Printing_Elves\Farmhand\YouTube clips", "problem": None}
     assert page["clips"] == []
 
-    assert api.put("/api/clips", json={"seconds": 4}).status_code == 422
+    assert api.put("/api/clips", json={"seconds": 0}).status_code == 422
     assert api.put("/api/clips", json={"seconds": 301}).status_code == 422
     assert api.put("/api/clips", json={"seconds": 90}).json()["seconds"] == 90
 
@@ -182,3 +182,14 @@ def test_no_clips_folder_is_said_on_the_page(clips_api, monkeypatch, tmp_path):
     assert "no clips folder" in page["folder"]["problem"]
     r = api.post("/api/clips", json={})
     assert r.status_code == 409 and "no clips folder" in r.json()["detail"]
+
+
+def test_a_one_second_clip_starts_at_the_whole_frame_before_it(tmp_path, kept):
+    got = clips.save("ffmpeg", tmp_path, 1, run=_ffmpeg_makes_an_mp4([]))
+    assert 1 <= got["seconds"] <= 3  # (a whole frame every 2 s: up to 2 s more than asked)
+
+
+def test_a_clip_is_3_seconds_unless_changed():
+    assert clips.seconds_of({}) == 3
+    assert clips.seconds_of({clips.CLIP_KEY: "120"}) == 120
+    assert clips.seconds_of({clips.CLIP_KEY: "nonsense"}) == 3

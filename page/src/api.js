@@ -41,7 +41,7 @@ export const getMigration = () => request("/migrate");
 export const migrateNow = (replace = false) => request("/migrate", jsonBody("POST", { replace }));
 export { post };
 
-// Clips: the last 5 seconds to 5 minutes of what went to YouTube, saved as MP4s in the clips folder (the NAS's
+// Clips: the last 1 second to 5 minutes of what went to YouTube, saved as MP4s in the clips folder (the NAS's
 // "YouTube clips"). { seconds (a clip's length, as set), least, most, held (seconds of stream kept now), folder: { path,
 // shownAs, problem }, clips: [{ name, size, made }] (newest first) }
 const normalizeClips = (r) => ({ ...r, folder: { path: r.folder.path, shownAs: r.folder.shown_as, problem: r.folder.problem } });
