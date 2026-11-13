@@ -3,6 +3,9 @@
 The live stream to YouTube as a plugin for [Farmhand](https://github.com/The-Original-Reth/farmhand), in its own repository
 and its own Docker container, talking to Farmhand only through Farmhand's plugin API.
 
+**Installing it:** [INSTALL.md](INSTALL.md) takes you from a machine with Docker to going live, step by step: the NAS
+folders, the compose file, adding it on Farmhand's Plugins page and where its token comes from.
+
 The YouTube Stream plugin (id `stream`) sends printers' cameras live to **YouTube Live**, no OBS needed, from a container of its own, so a
 Farmhand update, restart or crash never stops the stream. It is the only way Farmhand streams: Farmhand's own Stream
 page is gone. Once the plugin is added, **YouTube** is in Farmhand's menu where that page was, after Monitor, and opens
@@ -96,6 +99,8 @@ where `\040` is the space in its name), then `- "/mnt/youtube-clips:/clips"` in 
 so. Without a folder there, the page says what's missing and the button waits.
 
 ## Run it
+
+The whole install, step by step, is in [INSTALL.md](INSTALL.md); this is the short version.
 
 It runs on Farmhand's machine or any other machine on the farm's network that reaches Farmhand's API port (4545) and the
 cameras. [`docker-compose.yml`](docker-compose.yml) here is ready to use: it builds the plugin straight from this repository
