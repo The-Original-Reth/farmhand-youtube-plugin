@@ -47,7 +47,7 @@ What it adds over the Stream page older Farmhands had built in:
 | Path | What it is |
 |---|---|
 | `farmhand-plugin.json` | The manifest: id `stream`, port 8080, a page in Farmhand's menu, its permissions |
-| `streamer/live_stream/` | The engine (first copied from Farmhand's own, now gone); `feeders.py` reads each camera and draws the "Camera down" square |
+| `streamer/live_stream/` | The engine (first copied from Farmhand's own, now gone); `feeders.py` reads each camera, `down_square.py` draws its "Camera down" square |
 | `streamer/stream_media.py`, `youtube_live.py`, `routes.py` | The stream folder, YouTube sign-in and the page's API |
 | `streamer/store.py`, `farm.py`, `migrate.py`, `layouts.py`, `app.py` | The plugin's own: its settings file, reading Farmhand, the one-off move, saved layouts, the web server |
 | `streamer/live_stream/clips.py`, `streamer/clip_routes.py` | Clips: what went to YouTube kept five minutes, and saved as MP4s |
