@@ -1,5 +1,5 @@
 """
-Clips: the last few seconds to five minutes of what YouTube has been sent, saved as an MP4 in the clips folder.
+Clips: the last second to five minutes of what YouTube has been sent, saved as an MP4 in the clips folder.
 
 What goes to YouTube (the delay's buffer hands each piece to the sender, buffer.py) is also kept here, the last
 MOST_SECONDS and a little more, by when it went out: so a clip is what YouTube was given, holding screen and all, and
@@ -25,9 +25,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .relay import keyframe_at
 
-LEAST_SECONDS = 5
+LEAST_SECONDS = 1
 MOST_SECONDS = 300
-DEFAULT_SECONDS = 30
+DEFAULT_SECONDS = 3
 EXTRA = 10  # seconds kept beyond MOST_SECONDS, so the longest clip can still start at a whole frame
 CLIP_KEY = "clip_seconds"
 SHOWN = 10  # the newest clips the page lists
@@ -95,7 +95,7 @@ def seconds_of(db) -> int:
 
 def set_seconds(db, seconds: int) -> int:
     if not LEAST_SECONDS <= int(seconds) <= MOST_SECONDS:
-        raise ValueError(f"A clip is {LEAST_SECONDS} seconds to {MOST_SECONDS // 60} minutes long.")
+        raise ValueError(f"A clip is {LEAST_SECONDS} second to {MOST_SECONDS // 60} minutes long.")
     db.put(CLIP_KEY, str(int(seconds)))
     return int(seconds)
 
