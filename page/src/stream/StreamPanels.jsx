@@ -172,9 +172,9 @@ function YouTubeLiveLine({ yt }) {
         {yt.state ? ` · broadcast ${STATE[yt.state] || yt.state}` : ""}
         {yt.viewers !== null ? ` · ${yt.viewers} watching` : ""}
         {" · "}
-        <a href={yt.watchUrl} target="_blank" rel="noreferrer" style={{ color: c.link }}>Watch</a>
+        <a href={yt.watchUrl} target="_blank" rel="noreferrer" style={{ color: c.amber }}>Watch</a>
         {" · "}
-        <a href={yt.studioUrl} target="_blank" rel="noreferrer" style={{ color: c.link }}>Chat and analytics in YouTube Studio</a>
+        <a href={yt.studioUrl} target="_blank" rel="noreferrer" style={{ color: c.amber }}>Chat and analytics in YouTube Studio</a>
       </span>
       {yt.issues.map((i) => <div key={i} style={{ color: c.amber }}>{i}</div>)}
     </div>
