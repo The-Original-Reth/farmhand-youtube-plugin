@@ -14,6 +14,7 @@ Farmhand's own error answers are JSON, {"detail": "..."}, already in words meant
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -27,12 +28,14 @@ class FarmhandError(Exception):
     Farmhand couldn't be asked, or said no. `message` is for the operator; `kind` is for the code:
     "setup" (an environment variable is missing), "refused" (401), "forbidden" (403), "busy" (429),
     "down" (no answer), "gone" (410: handed over already) or "error" (anything else). `retry_after` is how many seconds to wait, when Farmhand said.
-    `short` is the same in fewer words (for /health, which Farmhand's Plugins page shows in a line or two).
+    `short` is the same in fewer words (for /health, which Farmhand's Plugins page shows in a line or two). `code`: the
+    HTTP status Farmhand answered (None when it didn't answer).
     """
 
-    def __init__(self, message: str, kind: str, retry_after: float | None = None, short: str | None = None):
+    def __init__(self, message: str, kind: str, retry_after: float | None = None, short: str | None = None,
+                 code: int | None = None):
         super().__init__(message)
-        self.message, self.kind, self.retry_after = message, kind, retry_after
+        self.message, self.kind, self.retry_after, self.code = message, kind, retry_after, code
         self.short = short or message
 
 
@@ -66,6 +69,33 @@ class Farmhand:
     def stream_migration(self) -> dict:
         """POST /stream/migrate (stream:migrate): Farmhand's Stream page set-up, handed over once (410 after)."""
         return self.call("POST", "/stream/migrate")
+
+    def stream_design(self) -> dict:
+        """GET /stream/design (stream:read): Stream control's stream, {enabled, design, media}; {"enabled": false} while
+        it's switched off or this plugin isn't brought into it."""
+        return self.get("/stream/design")
+
+    def download(self, path: str, target, most: int = 200 * 1024 * 1024) -> None:
+        """A file of Farmhand's (/stream/pictures/..., say) written to `target` whole, or not at all: over `most`
+        bytes is refused (FarmhandError "error")."""
+        from pathlib import Path
+
+        target = Path(target)
+        part = target.with_name(f".{target.name}.part")
+        with self._open(path, accept="*/*", timeout=self.timeout) as answer:
+            got = 0
+            try:
+                with open(part, "wb") as out:
+                    while chunk := answer.read(256 * 1024):
+                        got += len(chunk)
+                        if got > most:
+                            raise FarmhandError(f"{path} is bigger than {most // (1024 * 1024)} MB.", "error")
+                        out.write(chunk)
+                os.replace(part, target)
+            except OSError as e:
+                raise FarmhandError(f"Couldn't keep {path} from Farmhand ({e}).", "error") from None
+            finally:
+                part.unlink(missing_ok=True)
 
     def farm(self) -> dict:
         """GET /farm (farm:read): {mode, colors, time_zone}, so the page matches Farmhand when opened on its own."""
@@ -137,6 +167,12 @@ class Farmhand:
 
 def _refusal(e: urllib.error.HTTPError) -> FarmhandError:
     """Farmhand's "no" (401, 403, 429...), in words for the operator."""
+    error = _refused(e)
+    error.code = e.code
+    return error
+
+
+def _refused(e: urllib.error.HTTPError) -> FarmhandError:
     detail = _detail(e)
     if e.code == 401:
         words = (

@@ -1,7 +1,7 @@
 """
 A stand-in for Farmhand's plugin API (/plugin-api/v1), answering in exactly its shapes (docs/plugins.md): the token
 checked, permissions checked, 429 on demand, the farm's cameras, each printer's print, and stream:migrate's one-off
-hand-over. Copied from the Hello plugin's tests, with what the Stream plugin reads added. `down` makes it answer
+hand-over, and Stream control's design (stream:read) with its files. Copied from the Hello plugin's tests, with what the Stream plugin reads added. `down` makes it answer
 nothing at all, as a stopped Farmhand.
 """
 from __future__ import annotations
@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "good-token"
-EVERYTHING = {"printers:read", "prints:read", "farm:read", "cameras:read", "stream:migrate"}
+EVERYTHING = {"printers:read", "prints:read", "farm:read", "cameras:read", "stream:migrate", "stream:read"}
 MJPEG = ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5",
          "-rw_timeout", "10000000", "-use_wallclock_as_timestamps", "1", "-f", "mpjpeg"]
 
@@ -48,6 +49,11 @@ class FakeFarmhand:
             "youtube": {"client": {"client_id": "123-abc.apps.googleusercontent.com", "client_secret": "GOCSPX-secret"},
                         "refresh_token": "1//refresh", "channel": "Print Farm", "stream_id": "own-stream"},
         }
+        # Stream control: its design while it takes this plugin's layout over (None: {"enabled": false}), and the files
+        # of its stream folder: {"pictures": {name: bytes}, "slideshows": {show: {name: bytes}}, "music": {name: bytes}}
+        self.design: dict | None = None
+        self.stream_files: dict = {"pictures": {}, "slideshows": {}, "music": {}}
+        self.slideshow_order: dict[str, list[str]] = {}  # a slideshow's pictures and blanks in order (else by name)
         self.handed_over_at: str | None = None
         self.down = False  # True: nothing answers (Farmhand stopped)
         self.permissions = set(EVERYTHING)
@@ -131,6 +137,10 @@ class FakeFarmhand:
                 return self.send(h, 410, {"detail": "Farmhand already handed its Stream page set-up to this plugin, and hands it over only once."})
             self.handed_over_at = "2026-11-11T10:00:00+00:00"
             return self.send(h, 200, {**self.migration, "handed_over_at": self.handed_over_at})
+        if path == "/stream/design":
+            return self.allowed(h, "stream:read") and self.stream_design(h)
+        if path.startswith("/stream/") and not path.startswith("/stream/migrate"):
+            return self.allowed(h, "stream:read") and self.stream_file(h, path)
         if path == "/printers":
             return self.allowed(h, "printers:read") and self.send(h, 200, {"printers": self.printers})
         if path.startswith("/printers/") and path.endswith("/print"):
@@ -146,6 +156,39 @@ class FakeFarmhand:
         if path == "/events":
             return self.allowed(h, "prints:read") and self.events(h)
         self.send(h, 404, {"detail": "Not Found"})
+
+    def design_answer(self) -> dict:
+        if self.design is None:
+            return {"enabled": False}
+        files = self.stream_files
+        shows = [{"name": n, "images": self.slideshow_order.get(n, sorted(f))} for n, f in sorted(files["slideshows"].items())]
+        return {"enabled": True, "design": self.design,
+                "media": {"images": sorted(files["pictures"]), "slideshows": shows, "music": sorted(files["music"]), "error": None}}
+
+    def stream_design(self, h) -> bool:
+        return self.send(h, 200, self.design_answer())
+
+    def stream_file(self, h, path: str) -> bool:
+        """/stream/pictures/{name}, /stream/slideshows/{show}/pictures/{name}, /stream/music/{name}: 404 while Stream
+        control is off (here: no design) or the file isn't there."""
+        parts = [urllib.parse.unquote(p) for p in path.split("/")[2:]]
+        files = self.stream_files
+        data = None
+        if self.design is not None:
+            if len(parts) == 2 and parts[0] == "pictures":
+                data = files["pictures"].get(parts[1])
+            elif len(parts) == 2 and parts[0] == "music":
+                data = files["music"].get(parts[1])
+            elif len(parts) == 4 and parts[0] == "slideshows" and parts[2] == "pictures":
+                data = files["slideshows"].get(parts[1], {}).get(parts[3])
+        if data is None:
+            return self.send(h, 404, {"detail": "That file isn't there."})
+        h.send_response(200)
+        h.send_header("Content-Type", "application/octet-stream")
+        h.send_header("Content-Length", str(len(data)))
+        h.end_headers()
+        h.wfile.write(data)
+        return True
 
     def allowed(self, h, permission: str) -> bool:
         if permission in self.permissions:

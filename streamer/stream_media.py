@@ -50,9 +50,18 @@ def folder(db: Store, make: bool = False) -> Path:
     return root
 
 
-def _slideshow_dir(db: Store, name: str, must_be_there: bool = False) -> Path:
-    """A slideshow's folder; with `must_be_there`, NotFound when it isn't."""
-    d = folder(db) / SLIDESHOWS / _name(name, "slideshow")
+def sent_from(db: Store) -> Path:
+    """Where the stream's own pictures, slideshows and music are read from as it goes out: the stream folder, or while
+    Farmhand's Stream control takes over, the plugin's copy of its files (stream_control.py). The page's own pictures,
+    uploads and the rest are always the stream folder's."""
+    from . import stream_control
+
+    return stream_control.media_folder() or folder(db)
+
+
+def _slideshow_dir(db: Store, name: str, must_be_there: bool = False, root: Path | None = None) -> Path:
+    """A slideshow's folder (in the stream folder, or `root`); with `must_be_there`, NotFound when it isn't."""
+    d = (root or folder(db)) / SLIDESHOWS / _name(name, "slideshow")
     if must_be_there and not d.is_dir():
         raise NotFound("That slideshow isn't there.")
     return d
@@ -197,17 +206,19 @@ def _picture_path(d: Path, name: str) -> Path:
 
 def picture(db: Store, slideshow: str | None, name: str) -> tuple[bytes, str]:
     """A picture's bytes and type: one of the single pictures, or one in a slideshow. NotFound when it isn't there."""
-    path = picture_path(db, slideshow, name)
+    path = _picture_path(_pictures_dir(folder(db), slideshow), name)
     return path.read_bytes(), PICTURE_TYPES[path.suffix.lower()]
 
 
 def picture_path(db: Store, slideshow: str | None, name: str) -> Path:
-    return _picture_path(_pictures_dir(folder(db), slideshow), name)
+    """A picture the stream shows (sent_from: Stream control's, while it takes over). NotFound when it isn't there."""
+    return _picture_path(_pictures_dir(sent_from(db), slideshow), name)
 
 
 def slideshow_paths(db: Store, name: str) -> list[Path]:
-    """A slideshow's pictures, in its own order ([] for one that isn't there); a blank screen as its name ("blank:1")."""
-    d = _slideshow_dir(db, name)
+    """A slideshow's pictures, in its own order ([] for one that isn't there); a blank screen as its name ("blank:1").
+    (As the stream shows it: sent_from.)"""
+    d = _slideshow_dir(db, name, root=sent_from(db))
     return [n if is_blank(n) else d / n for n in _slides_in(d)]
 
 
@@ -250,7 +261,7 @@ def remove_picture(db: Store, slideshow: str | None, name: str) -> None:
             raise NotFound("That blank screen isn't there.")
         _write_order(d, [n for n in slides if n != name])
     else:
-        picture_path(db, slideshow, name).unlink()
+        _picture_path(_pictures_dir(folder(db), slideshow), name).unlink()
     forget()
 
 
@@ -309,9 +320,10 @@ def track_path(db: Store, name: str) -> Path:
 
 
 def track_paths(db: Store) -> list[Path]:
-    """The music's tracks, in name order ([] when there are none, or the stream folder can't be used now)."""
+    """The music's tracks, in name order ([] when there are none, or the stream folder can't be used now). (As the stream
+    plays them: sent_from.)"""
     try:
-        d = folder(db) / MUSIC
+        d = sent_from(db) / MUSIC
     except storage.StorageUnavailableError:
         return []
     return [d / n for n in _files_in(d, TRACK_TYPES)]

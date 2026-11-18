@@ -46,6 +46,12 @@ What it adds over the Stream page older Farmhands had built in:
 - **Moving over from the old Stream page**: with `stream:migrate`, the first time it starts it brings over, once, what
   a Farmhand from before Stream became a plugin had set up on its Stream page: settings, saved layouts, stream key and
   YouTube sign-in. Farmhand keeps its copy in its database, unused.
+- **Farmhand's Stream control**: with `stream:read`, while Stream control (built into Farmhand) is switched on and this
+  stream is ticked under its Streams, the plugin sends the one stream designed there (its grid, pictures, slideshows,
+  music, holding screen, title and description, fetched into `/data/stream-control`) instead of its own layout, and
+  Stream control's Go live and Stop start and stop it (`/api/stream-control`). Its own layout stays saved and comes
+  back as soon as Stream control lets go; the page shows **Controlled by Stream control** in place of the layout
+  editor meanwhile. The stream key, the YouTube sign-in and the YouTube settings stay the plugin's.
 
 | Path | What it is |
 |---|---|

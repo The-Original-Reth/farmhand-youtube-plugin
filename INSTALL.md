@@ -57,6 +57,8 @@ It answers at `http://<that machine>:8080`, but doesn't know Farmhand yet.
    - `cameras:read`: your printers' camera addresses
    - `prints:read`: what each printer is printing
    - `stream:migrate`: only for a Farmhand that once had the built-in Stream page; untick it to start fresh
+   - `stream:read`: Stream control's design, for Farmhand's built-in Stream control to send its one stream through this
+     plugin (untick it and the plugin always sends its own layout)
 4. Leave **Only accept its token from its own address** ticked (the token is then useless anywhere else).
 5. Press **Add YouTube Stream**. The window **"Give YouTube Stream its token"** shows:
    ```
