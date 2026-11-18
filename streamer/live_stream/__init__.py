@@ -33,7 +33,7 @@ from __future__ import annotations
 from ..store import Store
 
 from . import broadcast, encoders, fonts, music, runner  # noqa: F401
-from .choices import auto_grid, rename_slideshow, save, settings  # noqa: F401
+from .choices import auto_grid, own_settings, rename_slideshow, save, settings  # noqa: F401
 from .constants import DESTINATIONS, RESOLUTION_LABELS, RESOLUTIONS, SETTINGS_KEY  # noqa: F401
 from .fonts import DEFAULT_FONT, FONT, FONTS, font_file  # noqa: F401
 from .picture import TURNS_FOR, Look, command, grid, timetable, windows  # noqa: F401
@@ -46,14 +46,16 @@ from .. import stream_media, youtube_live
 
 
 def page(db: Store) -> dict:
-    """Everything the Stream page shows: {settings, media (the stream folder's pictures, slideshows and music, stream_media.media),
+    """Everything the Stream page shows: {settings (the plugin's own), stream_control, media (the stream folder's pictures, slideshows and music, stream_media.media),
     status, destinations, resolutions, fonts (what a square's words can be written in), youtube, test_destination (where
     the stream goes instead of YouTube while the plugin is being tried out, or None)}."""
-    from .. import config
+    from .. import config, stream_control
 
     return {
         "test_destination": config.settings.test_destination,
-        "settings": settings(db),
+        "settings": own_settings(db),  # (the page edits the plugin's own, Stream control taking over or not)
+        # Farmhand's Stream control: {following (its design is sent, not these settings), revision, saved_at, title, note}
+        "stream_control": stream_control.page_part(),
         "media": stream_media.media(db),
         "status": stream.status(),
         "destinations": [{"key": k, "label": v["label"]} for k, v in DESTINATIONS.items()],

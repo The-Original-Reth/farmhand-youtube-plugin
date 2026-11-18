@@ -127,7 +127,7 @@ export function YouTubeSettingsWindow() {
           <div style={uiText(13, loadError ? c.danger : c.textFaint)}>{loadError ? `Couldn't reach Farmhand: ${loadError}` : "Loading…"}</div>
         ) : (
           <YouTubeSettingsForm
-            shown={page.settings} keySet={page.settings.keySet} youtube={page.youtube} status={page.status} ask={ask} busy={busy}
+            shown={page.settings} keySet={page.settings.keySet} youtube={page.youtube} status={page.status} ask={ask} busy={busy} streamControl={page.streamControl}
             problem={problem} savedAt={savedAt}
             onSave={async (fields) => {
               const p = await ask("save", () => saveStream(fields));
@@ -145,7 +145,8 @@ export function YouTubeSettingsWindow() {
 // The settings themselves. `shown`: the stream's settings (title, description, youtube: {...}); `onSave(fields)`:
 // saves just these, the page as the server answered or null; `keySet`, `onForgetKey`; `youtube`, `status`, `ask`,
 // `busy`: the account's (YouTubeAccountPanel); `problem`: what the server last refused; `savedAt`: when last saved.
-function YouTubeSettingsForm({ shown, onSave, keySet, onForgetKey, youtube, status, ask, busy, problem, savedAt }) {
+// `streamControl`: page.streamControl (while following, the title and description sent are Stream control's).
+function YouTubeSettingsForm({ shown, onSave, keySet, onForgetKey, youtube, status, ask, busy, problem, savedAt, streamControl }) {
   const [form, setForm] = useState(() => ({
     title: shown.title || "", description: shown.description || "",
     tags: (shown.youtube?.tags || []).join(", "),
@@ -178,6 +179,13 @@ function YouTubeSettingsForm({ shown, onSave, keySet, onForgetKey, youtube, stat
         </div>
 
         <Section title="The video">
+          {streamControl?.following && (
+            <div data-testid="yt-text-controlled" style={uiText(12, c.amber, { lineHeight: 1.5 })}>
+              Farmhand&apos;s Stream control is sending this stream, with its own title and description
+              {streamControl.title ? ` (“${streamControl.title}”)` : ""}: change those in Stream control. The ones here are
+              kept for when it lets go; the tags, privacy and the rest below are sent as ever.
+            </div>
+          )}
           <label style={column}>
             <span>Title <span style={uiText(11, c.textFaint)}>{form.title.length}/100</span></span>
             <input data-testid="yt-title" value={form.title} maxLength={100} onChange={(e) => set({ title: e.target.value })}

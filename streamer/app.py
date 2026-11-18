@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from . import clip_routes, farm, page_routes, save_location_routes
-from .routes import router
+from .routes import control, router
 
 HERE = Path(__file__).resolve().parent
 WEB = HERE / "web"  # the page, built by `npm run build` in ../page (the Dockerfile does it)
@@ -25,6 +25,7 @@ MANIFEST = Path("/farmhand-plugin.json") if Path("/farmhand-plugin.json").is_fil
 
 app = FastAPI(title="Farmhand Stream plugin", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(router)
+app.include_router(control)
 app.include_router(page_routes.router)
 app.include_router(clip_routes.router)
 app.include_router(save_location_routes.router)

@@ -90,6 +90,24 @@ def _saved(db: Store) -> dict:
 
 def settings(db: Store) -> dict:
     """
+    What the stream sends: the plugin's own settings (own_settings), or while Farmhand's Stream control takes over
+    (stream_control.py), its design laid over them, read by the same rules. The engine reads this one.
+    """
+    from ..stream_control import DESIGN_KEYS, design
+
+    taking_over = design()
+    if taking_over is None:
+        return own_settings(db)
+    return _read(db, {**_saved(db), **{k: taking_over[k] for k in DESIGN_KEYS if k in taking_over}})
+
+
+def own_settings(db: Store) -> dict:
+    """The plugin's own settings, as kept (Stream control taking over or not): what the page edits. See _read."""
+    return _read(db, _saved(db))
+
+
+def _read(db: Store, raw: dict) -> dict:
+    """
     {destination, cols, rows, cells: [one per square, row by row, see _cell], cameras (the
     cameras' keys in the grid, square by square), show_status, layout: "grid" | "cycle", seconds_all, seconds_each,
     resolution, border_color: "#RRGGBB", background: the stream's colour "#RRGGBB", font and color: the
@@ -102,7 +120,6 @@ def settings(db: Store) -> dict:
     comes from YouTube}.
     The key itself is never given. Settings from before the grid (a list of cameras) come back as the grid they made.
     """
-    raw = _saved(db)
     destination = raw.get("destination") if raw.get("destination") in DESTINATIONS else DEFAULT_DESTINATION
     text = lambda name: raw.get(name) if isinstance(raw.get(name), str) else ""  # noqa: E731
     if isinstance(raw.get("cells"), list) and _side(raw.get("cols")) and _side(raw.get("rows")):
@@ -199,9 +216,10 @@ def save(db: Store, *, destination=None, chosen=None, show_status=None, stream_k
     """
     Change what's given (None: left as it is). The grid comes as cols, rows and cells together; or `chosen`, a list of
     cameras, which makes a grid just big enough for them, in that order. Anything that can't be
-    used is refused with why.
+    used is refused with why. (The plugin's own settings: while Stream control takes over they're kept as changed, and
+    what's sent stays its design. Answers what's sent, settings().)
     """
-    now = settings(db)
+    now = own_settings(db)
     if destination is not None:
         if destination not in DESTINATIONS:
             raise ValueError("Farmhand streams to YouTube Live for now.")

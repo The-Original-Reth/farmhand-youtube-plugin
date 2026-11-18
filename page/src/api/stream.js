@@ -83,6 +83,11 @@ const normalizeStream = (s) => ({
       health: s.status.youtube.health, issues: s.status.youtube.issues || [], viewers: s.status.youtube.viewers ?? null,
     } : null,
   },
+  // Farmhand's Stream control: while `following`, the stream sends the layout designed there (revision, savedAt and
+  // title are its), not these settings, which stay as saved; `note`: why its design couldn't be asked or put on, or null
+  streamControl: ((x) => ({
+    following: !!x.following, revision: x.revision ?? null, savedAt: x.saved_at || null, title: x.title || null, note: x.note || null,
+  }))(s.stream_control || {}),
   // being tried out: the rtmp:// address the stream goes to instead of YouTube, or null
   testDestination: s.test_destination || null,
   destinations: s.destinations,

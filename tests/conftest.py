@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so "import streamer" works from the repository's folder
 
-from streamer import config, store  # noqa: E402
+from streamer import config, store, stream_control  # noqa: E402
 
 from .fake_farmhand import TOKEN, FakeFarmhand  # noqa: E402
 from .fake_ffmpeg import FakeFfmpeg  # noqa: E402
@@ -39,7 +39,9 @@ def plugin(farmhand, tmp_path, monkeypatch):
         farmhand_url=farmhand.url, farmhand_token=TOKEN, port=0, data_dir=tmp_path / "data", media_dir=tmp_path / "media"))
     s = store.Store(tmp_path / "data" / "settings.json")
     store.use(s)
+    stream_control.reset()  # (the plugin's own layout until a test has Farmhand's Stream control take over)
     yield s
+    stream_control.reset()
     store.use(None)
 
 

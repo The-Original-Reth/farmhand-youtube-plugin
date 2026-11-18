@@ -5,7 +5,7 @@ import os
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
-from . import live_stream, storage, stream_media, youtube_live
+from . import live_stream, storage, stream_control, stream_media, youtube_live
 from .errors import answer_errors
 from .schemas import SlideshowIn, SlideshowOrderIn, StreamSettingsIn, YouTubeClientIn, YouTubeSignOutIn
 from .store import Store, session_factory, store
@@ -63,18 +63,26 @@ def save_settings(payload: StreamSettingsIn, db: Store = Depends(get_db)):
             music=payload.music, music_volume=payload.music_volume, music_shuffle=payload.music_shuffle, delay=payload.delay, youtube=payload.youtube, holding=payload.holding,
             stream_key=payload.stream_key, clear_key=payload.clear_key,
         )
-        live = live_stream.stream.status()["live"]
-        if live and not after["enabled"]:  # turned off: nothing streams
-            live_stream.stream.stop()
-        elif live and (any(before[k] != after[k] for k in PICTURE) or payload.stream_key):
-            _restart_if_live(db)
-        elif live and any(before[k] != after[k] for k in MUSIC):
-            live_stream.stream.music_settings(after)
-        elif (live and after["destination"] == "youtube"
-              and (before["title"], before["description"], before["youtube"]) != (after["title"], after["description"], after["youtube"])):
-            text_changed = (before["title"], before["description"]) != (after["title"], after["description"])
-            live_stream.stream.send_to_youtube(db, after, text_changed=text_changed)
+        apply_change(db, before, after, new_key=bool(payload.stream_key))
     return live_stream.page(db)
+
+
+def apply_change(db: Store, before: dict, after: dict, new_key: bool = False) -> None:
+    """What's sent changed from `before` to `after` (settings(): saved on the page, or Stream control's design switched
+    to, from, or saved again): while live, the stream follows. Off: it stops; the picture: it starts again with it (a
+    hand-over, no break); the music: it follows as it plays; the title, description or YouTube settings: set on the
+    broadcast. ValueError when the new picture can't go out (the stream carries on as it was)."""
+    live = live_stream.stream.status()["live"]
+    if live and not after["enabled"]:  # turned off: nothing streams
+        live_stream.stream.stop()
+    elif live and (any(before[k] != after[k] for k in PICTURE) or new_key):
+        _restart_if_live(db)
+    elif live and any(before[k] != after[k] for k in MUSIC):
+        live_stream.stream.music_settings(after)
+    elif (live and after["destination"] == "youtube"
+          and (before["title"], before["description"], before["youtube"]) != (after["title"], after["description"], after["youtube"])):
+        text_changed = (before["title"], before["description"]) != (after["title"], after["description"])
+        live_stream.stream.send_to_youtube(db, after, text_changed=text_changed)
 
 
 @router.post("/start")
@@ -105,6 +113,8 @@ def _media(call):
 
 def _restart_if_used(db: Store, slideshow: str | None, image: str | None = None) -> None:
     """Pictures changed: the stream starts again with them, when it's live and a square shows them."""
+    if stream_control.design() is not None:  # (Stream control's design is sent: the stream folder's aren't shown)
+        return
     def on_it(c) -> bool:  # (its own picture, or one of its more pictures, a slideshow screen's too)
         layers = [*(c.get("layers") or []), *(x for ls in (c.get("slide_layers") or {}).values() for x in ls)]
         return c.get("image") == image or any(x.get("type") == "picture" and x.get("image") == image for x in layers)
@@ -316,3 +326,38 @@ def youtube_apply(db: Store = Depends(get_db)):
     with answer_errors():
         live_stream.stream.send_to_youtube(db, live_stream.settings(db), asked=True)
     return live_stream.page(db)
+
+
+# ------------------------------------------------------------------ Farmhand's Stream control
+# Farmhand starts and stops the stream from its Stream control page (the manifest's stream_control path), and asks how
+# it's doing. Each answers {live, following (Stream control's design is sent, not this plugin's own layout), error (why
+# it isn't live when it should be, in plain words), watch_url}. A start that can't happen is 422 {"detail": why}.
+control = APIRouter(prefix="/api/stream-control", tags=["stream control"])
+
+
+def control_status() -> dict:
+    status = live_stream.stream.status()
+    youtube = status.get("youtube") or {}
+    error = status["error"] or (stream_control.note() if status["live"] and stream_control.design() is not None else None)
+    return {"live": status["live"], "following": stream_control.design() is not None, "error": error,
+            "watch_url": youtube.get("watch_url") if status["live"] else None}
+
+
+@control.get("")
+def control_get():
+    return control_status()
+
+
+@control.post("/start")
+def control_start(db: Store = Depends(get_db)):
+    """Go live (with Stream control's design while it takes over); live already: carries on as it is."""
+    if not live_stream.stream.status()["live"]:
+        with answer_errors():
+            live_stream.stream.go_live(db, session_factory)
+    return control_status()
+
+
+@control.post("/stop")
+def control_stop():
+    live_stream.stream.stop()
+    return control_status()
