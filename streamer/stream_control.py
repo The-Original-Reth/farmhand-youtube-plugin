@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -31,6 +32,10 @@ from .store import store
 EVERY = 5  # seconds between asking Farmhand for the design
 ASK_TIMEOUT = 8
 FETCH_TIMEOUT = 60  # one file (an MP3 can be big)
+STAMPS_FILE = ".stamps.json"  # in the cache: Farmhand's stamp of each file as it was copied ({"images/logo.png": "size-mtime"})
+RETRIES = 4  # times a file is tried again after Farmhand asks the plugin to slow down (429), waiting as it says
+RETRY_MOST = 10  # seconds waited at most before each of those
+_sleep = time.sleep  # (tests wait for nothing)
 # what Stream control's design decides, in place of the plugin's own (live_stream/choices.py's names and shapes)
 DESIGN_KEYS = ("cols", "rows", "cells", "show_status", "layout", "seconds_all", "seconds_each", "resolution", "border_color",
                "background", "font", "color", "music", "music_volume", "music_shuffle", "delay", "holding", "title",
@@ -191,30 +196,69 @@ def _keep_only(d: Path, names: set[str], dirs: bool = False) -> None:
             p.unlink(missing_ok=True)
 
 
+def _read_stamps(root: Path) -> dict[str, str]:
+    try:
+        kept = json.loads((root / STAMPS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in kept.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(kept, dict) else {}
+
+
+def _failed(failures: list[tuple[str, str]]) -> str | None:
+    """Files that couldn't be copied, in one short line: how many, and the first one or two by name."""
+    if not failures:
+        return None
+    n = len(failures)
+    first = ", ".join(f"{name} ({why})" for name, why in failures[:1]) + "".join(f", {name}" for name, _ in failures[1:2])
+    more = f" and {n - 2} more" if n > 2 else ""
+    return f"{n} of Stream control's files couldn't be copied from Farmhand: {first}{more}."
+
+
 def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
-    """The files the design names, into the cache: pictures (fetched again on a new revision, as they may have been
-    replaced), its slideshows' pictures in their order, and the music (once: an MP3 is big, and doesn't change). Files
-    it no longer names are removed. What went wrong, in words (a square without its picture shows its colour)."""
+    """The files the design names, into the cache: its pictures, its slideshows' pictures in their order, and the music.
+    A file is fetched only when it isn't copied yet or Farmhand's stamp for it (media.stamps, its size and time) has
+    changed since it was; the stamps copied are kept in the cache (STAMPS_FILE). (A Farmhand that sends no stamps:
+    pictures fetched again on a new revision, music once.) Farmhand asking to slow down (429) is waited out. Files it
+    no longer names are removed. What went wrong, in a line or two (a square without its picture shows its colour)."""
     root = cache()
     images_dir, shows_dir, music_dir = root / stream_media.IMAGES, root / stream_media.SLIDESHOWS, root / stream_media.MUSIC
     for d in (images_dir, shows_dir, music_dir):
         d.mkdir(parents=True, exist_ok=True)
     client = farm.client(FETCH_TIMEOUT)
-    problems: list[str] = []
+    stamps = media.get("stamps") if isinstance(media.get("stamps"), dict) else None
+    copied = _read_stamps(root)
+    wanted: set[str] = set()
+    failures: list[tuple[str, str]] = []
     q = lambda s: urllib.parse.quote(s, safe="")  # noqa: E731
 
-    def get(path: str, target: Path, refetch: bool) -> None:
-        if target.is_file() and not refetch:
-            return
-        try:
-            client.download(path, target)
-        except FarmhandError as e:
-            problems.append(f"{target.name}: {e.message}")
+    def get(rel: str, path: str, target: Path, refetch: bool) -> None:
+        wanted.add(rel)
+        stamp = stamps.get(rel) if stamps is not None else None
+        if target.is_file():
+            if stamps is None and not refetch:
+                return
+            if stamp is not None and copied.get(rel) == stamp:
+                return
+        for tries in range(RETRIES + 1):
+            try:
+                client.download(path, target)
+                break
+            except FarmhandError as e:
+                if e.kind == "busy" and tries < RETRIES:
+                    _sleep(min(RETRY_MOST, max(0.5, e.retry_after or 1)))
+                    continue
+                copied.pop(rel, None)
+                failures.append((target.name, e.message))
+                return
+        if stamp is not None:
+            copied[rel] = stamp
+        else:
+            copied.pop(rel, None)
 
     images, shows = _names(design_)
     images = {n for n in images if _ok(n)}
     for name in sorted(images):
-        get(f"/stream/pictures/{q(name)}", images_dir / name, again)
+        get(f"{stream_media.IMAGES}/{name}", f"/stream/pictures/{q(name)}", images_dir / name, again)
     _keep_only(images_dir, images)
 
     listed = {s["name"]: s.get("images") or [] for s in media.get("slideshows") or [] if isinstance(s, dict) and isinstance(s.get("name"), str)}
@@ -225,15 +269,21 @@ def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
         order = [n for n in listed.get(show, []) if isinstance(n, str) and (stream_media.is_blank(n) or _ok(n))]
         for name in order:
             if not stream_media.is_blank(name):
-                get(f"/stream/slideshows/{q(show)}/pictures/{q(name)}", d / name, again)
+                get(f"{stream_media.SLIDESHOWS}/{show}/{name}", f"/stream/slideshows/{q(show)}/pictures/{q(name)}", d / name, again)
         (d / stream_media.ORDER_FILE).write_text(json.dumps(order, ensure_ascii=False), encoding="utf-8")
         _keep_only(d, {n for n in order if not stream_media.is_blank(n)})
     _keep_only(shows_dir, shows, dirs=True)
 
     tracks = {n for n in media.get("music") or [] if isinstance(n, str) and _ok(n)} if design_.get("music") is not False else set()
     for name in sorted(tracks):
-        get(f"/stream/music/{q(name)}", music_dir / name, False)
+        get(f"{stream_media.MUSIC}/{name}", f"/stream/music/{q(name)}", music_dir / name, False)
     _keep_only(music_dir, tracks)
+
+    try:  # (only the files still named, as copied)
+        (root / STAMPS_FILE).write_text(json.dumps({k: v for k, v in copied.items() if k in wanted}, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+    problems = [p for p in (_failed(failures),) if p]
     if isinstance(media.get("error"), str) and media["error"]:
         problems.insert(0, f"Stream control's folder: {media['error']}")
     return problems
