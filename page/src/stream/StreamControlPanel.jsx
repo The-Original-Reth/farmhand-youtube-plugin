@@ -3,9 +3,9 @@ import { c } from "../theme.js";
 import { uiText } from "../styles.js";
 import { heading, help, panel } from "./streamStyles.js";
 
-// While Farmhand's Stream control takes this plugin's layout over, the stream sends the one designed there: this panel
-// stands where the layout editor (the grid, its squares, the music, the holding screen, saved layouts) is. The plugin's
-// own layout stays saved as it was, and comes back when Stream control is switched off or this stream is unticked in it.
+// While Farmhand's Stream control takes this plugin's stream over, the stream sends the one designed there, and Stream
+// control starts and stops it: this block is all the plugin's page shows. The plugin's own layout stays saved as it was,
+// and the page comes back when Stream control is switched off or this stream is unticked in it.
 // `sc`: page.streamControl { following, revision, savedAt, title, note }.
 export function StreamControlPanel({ sc }) {
   const saved = sc.savedAt ? new Date(sc.savedAt) : null;
@@ -21,7 +21,8 @@ export function StreamControlPanel({ sc }) {
       </div>
       <div style={help}>
         This plugin&apos;s own layout is kept as it was and comes back when Stream control is switched off, or this stream
-        is unticked under its Streams. The stream key, the YouTube sign-in and the YouTube settings stay here.
+        is unticked under its Streams. Going live and stopping are done there too. The stream key, the YouTube sign-in and
+        the YouTube settings stay this plugin&apos;s: open them with the YouTube settings button in Stream control.
         {saved && !Number.isNaN(saved.getTime()) ? ` Last saved in Stream control ${saved.toLocaleString()}.` : ""}
       </div>
       {sc.note && (

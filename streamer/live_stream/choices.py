@@ -98,7 +98,9 @@ def settings(db: Store) -> dict:
     taking_over = design()
     if taking_over is None:
         return own_settings(db)
-    return _read(db, {**_saved(db), **{k: taking_over[k] for k in DESIGN_KEYS if k in taking_over}})
+    # (the plugin's own on/off switch is set aside while following: Stream control starts and stops the stream, and the
+    # page, which shows only Stream control's word, has no switch; letting go, the plugin's own switch counts again)
+    return {**_read(db, {**_saved(db), **{k: taking_over[k] for k in DESIGN_KEYS if k in taking_over}}), "enabled": True}
 
 
 def own_settings(db: Store) -> dict:

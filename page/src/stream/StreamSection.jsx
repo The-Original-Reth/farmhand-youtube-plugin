@@ -91,6 +91,13 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
     };
   }, []);
 
+  // Farmhand's Stream control takes the stream over (its design is sent; it starts and stops it): the page is just a
+  // word saying so. The plugin's own layout stays saved, and the page comes back as it was as soon as it lets go. (The
+  // YouTube settings window, ?view=youtube-settings, which Stream control opens, is apart from this and unchanged.)
+  if (page?.streamControl.following) {
+    return <StreamControlPanel sc={page.streamControl} />;
+  }
+
   if (!page) {
     return <div style={uiText(13, loadError ? c.danger : c.textFaint)}>{loadError ? `Couldn't load the stream: ${loadError}` : "Loading…"}</div>;
   }
@@ -185,7 +192,7 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
   };
   // Go live: what's changed here is saved first
   const start = async () => {
-    if (changed && !following && !(await saveAll())) return;
+    if (changed && !(await saveAll())) return;
     ask("start", startStream);
   };
   const stop = () => ask("stop", stopStream);
@@ -211,9 +218,6 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
     return true;
   };
 
-  // Farmhand's Stream control takes the layout over: its design is sent, and the layout editor gives way to a word
-  // saying so (the plugin's own layout, and anything changed here and not saved, stay as they are for when it lets go)
-  const following = page.streamControl.following;
   const status = page.status;
   const destLabel = (k) => page.destinations.find((d) => d.key === k)?.label || k;
   // the grid's squares as the preview plays them
@@ -248,9 +252,6 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
       {/* left: what the stream looks like; right: going live and what goes into it. On a phone, one under the other,
           and the preview scrolls away with the page rather than staying over the panels */}
       <div style={{ minWidth: 0, ...(!phone && { position: "sticky", top: 0 }) }}>
-        {following ? (
-          <StreamControlPanel sc={page.streamControl} />
-        ) : (
         <StreamPreview
           shown={shown} change={change} squares={squares} showStatus={shown.showStatus} live={status.live} liveResolution={status.resolution} resolutions={page.resolutions}
           cameras={cameras} media={page.media} fonts={page.fonts} label={label}
@@ -258,7 +259,6 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
           serverClock={status.serverTime !== null && (!changed || resynced) ? { serverTime: status.serverTime, heardAt: status.heardAt, live: status.onAir } : null}
           cycle={shown.layout === "cycle" ? { all: Number(shown.secondsAll) || 0, each: Math.max(1, Number(shown.secondsEach) || 0) } : null}
         />
-        )}
       </div>
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
         <LiveStatusPanel status={status} destLabel={destLabel} destination={shown.destination} busy={busy} onStart={start} onStop={stop} off={!enabled} />
@@ -271,7 +271,7 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
 
         <WhereToPanel
           destination={shown.destination} destinations={page.destinations} onDestination={(destination) => change({ destination })}
-          delay={shown.delay} onDelay={(v) => change({ delay: v })} live={status.live} fromStreamControl={following}
+          delay={shown.delay} onDelay={(v) => change({ delay: v })} live={status.live}
           youtubeSettings={
             <>
               <YouTubeSettingsButton shown={saved} youtube={page.youtube} keySet={saved.keySet} onOpen={openYouTubeSettings} />
@@ -284,8 +284,6 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
           }
         />
 
-        {!following && (
-        <>
         <HoldingScreenPanel shown={shown} change={change} media={page.media} fonts={page.fonts} saved={saved.holding} onSave={saveHolding} busy={busy} />
         <DefaultsPanel shown={shown} change={change} cameras={cameras} finding={finding && !cameras.length} count={inGrid.length} fonts={page.fonts} />
         <MusicPanel shown={shown} change={change} media={page.media} ask={ask} busy={busy} live={status.live} onAir={status.music} heardAt={status.heardAt} enabled={enabled} control={music} onWaiting={setMusicWaits} muted={muted} savedVolume={saved.musicVolume} />
@@ -311,8 +309,6 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
               Save
             </button>
           </div>
-        )}
-        </>
         )}
       </div>
     </div>

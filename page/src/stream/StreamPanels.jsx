@@ -184,8 +184,7 @@ function YouTubeLiveLine({ yt }) {
 // Where it goes, and the stream's delay (the stream key and the rest of YouTube are in the YouTube settings window)
 // `delay`, `onDelay`: seconds the stream is held before YouTube gets it (saved with Save; applies when going live).
 // `youtubeSettings`: the YouTube settings button and its summary (the stream key, title and account are in its window).
-// (`fromStreamControl`: Farmhand's Stream control sets the delay, so it isn't changed here)
-export function WhereToPanel({ destination, destinations, onDestination, delay = 60, onDelay, live = false, youtubeSettings = null, fromStreamControl = false }) {
+export function WhereToPanel({ destination, destinations, onDestination, delay = 60, onDelay, live = false, youtubeSettings = null }) {
   return (
     <div style={panel()}>
       <div style={heading}>Where to</div>
@@ -203,10 +202,6 @@ export function WhereToPanel({ destination, destinations, onDestination, delay =
         )}
       </label>
       {youtubeSettings}
-      {fromStreamControl ? (
-        <div data-testid="stream-delay-controlled" style={help}>The stream delay is set in Farmhand&apos;s Stream control.</div>
-      ) : (
-      <>
       <label style={uiText(12, c.textMuted, { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" })}>
         <span style={{ width: 90 }}>Stream delay</span>
         <input
@@ -220,8 +215,6 @@ export function WhereToPanel({ destination, destinations, onDestination, delay =
         falling behind for a moment) never reaches viewers. They see everything this much later.
         {live ? " A new delay applies the next time you go live." : ""}
       </div>
-      </>
-      )}
     </div>
   );
 }

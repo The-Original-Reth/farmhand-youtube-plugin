@@ -10,6 +10,7 @@ import json
 import queue
 import threading
 import urllib.parse
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = "good-token"
@@ -54,6 +55,8 @@ class FakeFarmhand:
         self.design: dict | None = None
         self.stream_files: dict = {"pictures": {}, "slideshows": {}, "music": {}}
         self.slideshow_order: dict[str, list[str]] = {}  # a slideshow's pictures and blanks in order (else by name)
+        self.send_stamps = True  # media.stamps in the design's answer (False: a Farmhand from before them)
+        self.files_busy_for = 0  # the next this-many file downloads get 429 (Retry-After: 1)
         self.handed_over_at: str | None = None
         self.down = False  # True: nothing answers (Farmhand stopped)
         self.permissions = set(EVERYTHING)
@@ -162,8 +165,15 @@ class FakeFarmhand:
             return {"enabled": False}
         files = self.stream_files
         shows = [{"name": n, "images": self.slideshow_order.get(n, sorted(f))} for n, f in sorted(files["slideshows"].items())]
-        return {"enabled": True, "design": self.design,
-                "media": {"images": sorted(files["pictures"]), "slideshows": shows, "music": sorted(files["music"]), "error": None}}
+        media = {"images": sorted(files["pictures"]), "slideshows": shows, "music": sorted(files["music"]), "error": None}
+        if self.send_stamps:  # each file's "<size>-<changed>" by its place in the folder (here: its size and checksum)
+            stamp = lambda data: f"{len(data)}-{zlib.crc32(data)}"  # noqa: E731
+            media["stamps"] = {
+                **{f"images/{n}": stamp(d) for n, d in files["pictures"].items()},
+                **{f"slideshows/{show}/{n}": stamp(d) for show, f in files["slideshows"].items() for n, d in f.items()},
+                **{f"music/{n}": stamp(d) for n, d in files["music"].items()},
+            }
+        return {"enabled": True, "design": self.design, "media": media}
 
     def stream_design(self, h) -> bool:
         return self.send(h, 200, self.design_answer())
@@ -171,6 +181,9 @@ class FakeFarmhand:
     def stream_file(self, h, path: str) -> bool:
         """/stream/pictures/{name}, /stream/slideshows/{show}/pictures/{name}, /stream/music/{name}: 404 while Stream
         control is off (here: no design) or the file isn't there."""
+        if self.files_busy_for > 0:
+            self.files_busy_for -= 1
+            return self.send(h, 429, {"detail": "This plugin is asking Farmhand too often."}, {"Retry-After": "1"})
         parts = [urllib.parse.unquote(p) for p in path.split("/")[2:]]
         files = self.stream_files
         data = None

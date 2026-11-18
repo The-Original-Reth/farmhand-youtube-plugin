@@ -52,8 +52,10 @@ What it adds over the Stream page older Farmhands had built in:
   stream is ticked under its Streams, the plugin sends the one stream designed there (its grid, pictures, slideshows,
   music, holding screen, title and description, fetched into `/data/stream-control`) instead of its own layout, and
   Stream control's Go live and Stop start and stop it (`/api/stream-control`). Its own layout stays saved and comes
-  back as soon as Stream control lets go; the page shows **Controlled by Stream control** in place of the layout
-  editor meanwhile. The stream key, the YouTube sign-in and the YouTube settings stay the plugin's.
+  back as soon as Stream control lets go; the page shows only **Controlled by Stream control** meanwhile (the plugin's
+  own on/off switch is set aside until then). Only the files that are new or changed in Farmhand (its `media.stamps`)
+  are fetched again, and Farmhand asking it to slow down is waited out. The stream key, the YouTube sign-in and the
+  YouTube settings stay the plugin's, in its YouTube settings window, which Stream control opens from Farmhand.
 
 | Path | What it is |
 |---|---|
