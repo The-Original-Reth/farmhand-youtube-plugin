@@ -3,6 +3,8 @@ The holding screen: what YouTube is shown after the plugin's own restart while t
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from streamer import store
@@ -115,6 +117,62 @@ def test_the_self_check_fills_a_used_up_delay_again(api, ffmpeg, farmhand, plugi
     stream._buffer.write(b"G" + bytes(187))
     assert wait_until(lambda: ffmpeg.holding_procs[0].poll() is not None, timeout=5)  # the delay held again: ended
     assert api.get("/api/stream").json()["status"]["holding"] is False
+    stream.stop()
+
+
+def test_a_partly_used_delay_is_topped_up_behind_the_holding_screen():
+    """A stall shorter than the self-check's left the delay partly used: top_up collects what's missing again behind
+    the holding screen, keeping what's held (no waiting the whole delay over, as refill does), then what's held goes on."""
+    import time
+
+    from streamer.live_stream import buffer as relay
+
+    from .fake_ffmpeg import HOLDING_FRAME, _Holding, _Sink
+
+    buffer, sink = relay.Buffer(0.4), _Sink()
+    buffer.set_sink(sink)
+    buffer.write(b"\x47" + b"A" * 187)
+    assert wait_until(lambda: b"A" * 187 in bytes(sink.written), timeout=3) and not buffer.filling()
+    hold = _Holding()
+    assert buffer.top_up(hold)
+    assert buffer.filling() and buffer.filled_from() is hold
+    assert buffer._first <= time.monotonic() - buffer.delay  # (only what's held is waited for)
+    assert not buffer.top_up(_Holding())  # (filling already)
+    buffer.write(b"\x47" + b"B" * 187)
+    assert wait_until(lambda: HOLDING_FRAME in bytes(sink.written), timeout=1)
+    assert wait_until(lambda: b"B" * 187 in bytes(sink.written), timeout=3)
+    assert hold.poll() is not None and not buffer.filling()
+    sent = bytes(sink.written)
+    assert sent.index(b"A" * 187) < sent.index(HOLDING_FRAME) < sent.index(b"B" * 187)
+    buffer.close()
+
+
+def test_the_self_check_tops_up_a_delay_left_short(api, ffmpeg, farmhand, plugin, monkeypatch):
+    """Short of its delay by TOP_UP_SHORT or more for TOP_UP_AFTER: the holding screen for the seconds missing, said on
+    the page; one only a little short is left alone."""
+    from streamer.live_stream import self_check, stream
+
+    monkeypatch.setattr(self_check, "CHECK_EVERY", 0.05)
+    monkeypatch.setattr(self_check, "STALL", 1000)  # (the stall check kept out of it)
+    monkeypatch.setattr(self_check, "TOP_UP_AFTER", 0.2)
+    monkeypatch.setattr(self_check, "TOP_UP_SHORT", 5)  # (more than the 1 s delay can be short: left alone)
+    grid(api, [{"camera": "1:Bed"}, None])
+    api.put("/api/stream", json={"delay": 1})
+    stream.go_live(store.store(), store.session_factory)
+    stream._buffer.write(b"G" + bytes(187))
+    assert wait_until(lambda: not stream._buffer.filling(), timeout=5)
+    assert wait_until(lambda: stream._buffer.held() == 0, timeout=3)  # (used up: the sender took it all)
+    assert stream._delay_short(stream._generation) == 1.0 and stream._top_up(stream._generation) is None
+    time.sleep(0.5)
+    assert ffmpeg.holdings == []
+    monkeypatch.setattr(self_check, "TOP_UP_SHORT", 0.5)
+    assert wait_until(lambda: len(ffmpeg.holdings) == 1, timeout=3)
+    page = api.get("/api/stream").json()["status"]
+    assert page["holding"] is True and "short stall had left 0 of the 1 s delay" in page["self_check"]["message"]
+    stream._buffer.write(b"G" + bytes(187))
+    assert wait_until(lambda: ffmpeg.holding_procs[0].poll() is not None, timeout=5)  # topped up: the holding screen ends
+    time.sleep(0.5)
+    assert len(ffmpeg.holdings) == 1  # (at most once every TOP_UP_EVERY)
     stream.stop()
 
 

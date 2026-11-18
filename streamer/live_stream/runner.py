@@ -325,6 +325,40 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
             player.attach(proc.stdin)
         return proc
 
+    def _top_up(self, gen: int) -> float | None:
+        """A short stall left the delay partly used (self_check: TOP_UP_SHORT seconds or more missing, for TOP_UP_AFTER):
+        the holding screen goes to YouTube for about the seconds missing while they're collected again behind it. The
+        seconds that were missing, or None (nothing changed: not short enough, filling already, or the holding screen
+        couldn't be shown)."""
+        from .self_check import TOP_UP_SHORT
+
+        with self._lock:
+            if not self._current(gen):
+                return None
+            buffer, player, resolution = self._buffer, self._player, self._resolution
+        if buffer is None or buffer.delay <= 0 or buffer.filling():
+            return None
+        missing = buffer.delay - buffer.held()
+        if missing < TOP_UP_SHORT:
+            return None
+        ffmpeg = procs.ffmpeg_path()
+        if not ffmpeg:
+            return None
+        db = store()
+        chosen = settings(db)
+        chosen["resolution"] = resolution or chosen["resolution"]  # (this time live's size, as the picture's)
+        proc = self._holding(db, chosen, ffmpeg, player)
+        return missing if proc is not None and buffer.top_up(proc) else None
+
+    def _delay_short(self, gen: int) -> float | None:
+        """How many seconds short of its delay the stream is now (0: all held), or None while there's nothing to look
+        at (no delay, or it's filling)."""
+        with self._lock:
+            buffer = self._buffer if self._current(gen) else None
+        if buffer is None or buffer.delay <= 0 or buffer.filling():
+            return None
+        return max(0.0, buffer.delay - buffer.held())
+
     def _refill(self, gen: int) -> bool:
         """The self-check started the picture again after a stall that used the delay up (less than half of it held):
         the holding screen goes to YouTube while the delay is collected afresh behind it, so the next hiccup is hidden

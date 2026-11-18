@@ -19,6 +19,13 @@ from .relay import Relay
 CHECK_EVERY = 5
 STALL = 60
 ENOUGH = 0.5
+# A stall shorter than that still uses up part of the delay, and it never comes back by itself (the sender plays on at
+# real time from what's left), so the next hiccup would be hidden less well. Once the delay has been TOP_UP_SHORT
+# seconds or more short of what it's set to for TOP_UP_AFTER seconds, what's missing is collected again behind the
+# holding screen (YouTube is shown it for about those seconds), at most once every TOP_UP_EVERY seconds.
+TOP_UP_SHORT = 10
+TOP_UP_AFTER = 60
+TOP_UP_EVERY = 600
 
 
 class SelfCheckMixin:
@@ -30,8 +37,25 @@ class SelfCheckMixin:
         cameras' pipes opened afresh), then, if that didn't help, the connection to YouTube as well."""
         seen = collections.deque()  # (when, the time of the last frame passed on then)
         tried_picture = False
+        short_since: float | None = None  # since when the delay has been TOP_UP_SHORT or more short
+        topped_up: float | None = None  # when it was last topped up
         while self._wait(gen, CHECK_EVERY):
             now = time.monotonic()
+            short = self._delay_short(gen)
+            if short is None or short < TOP_UP_SHORT:
+                short_since = None
+            elif short_since is None:
+                short_since = now
+            elif now - short_since >= TOP_UP_AFTER and (topped_up is None or now - topped_up >= TOP_UP_EVERY):
+                short_since, missing = None, self._top_up(gen)
+                if missing is not None:
+                    topped_up = now
+                    with self._lock:
+                        buffer = self._buffer if self._current(gen) else None
+                        if buffer is not None:
+                            self._healed = {"at": datetime.now(timezone.utc).isoformat(), "message": (
+                                f"A short stall had left {buffer.delay - missing:.0f} of the {buffer.delay:.0f} s delay held, so "
+                                f"the holding screen was shown for about {missing:.0f} s while the rest was collected again.")}
             seen.append((now, relay.last_time()))
             while seen and now - seen[0][0] > STALL + CHECK_EVERY / 2:
                 seen.popleft()
