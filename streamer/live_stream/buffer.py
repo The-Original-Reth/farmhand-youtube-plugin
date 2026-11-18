@@ -70,6 +70,25 @@ class Buffer:
             _stop(proc)
         return ok
 
+    def top_up(self, proc) -> bool:
+        """A stall shorter than the self-check's left the delay partly used (less held than it's set to, and it never
+        comes back by itself: the sender plays on at real time from what's left): what's missing is collected again,
+        `proc`'s stream (the holding screen) going to the sender meanwhile. Unlike refill(), what's held is kept, so
+        YouTube is shown the holding screen only for about the seconds missing (FILL_MOST at most). False (and `proc`
+        ended) when it's already filling, or ended."""
+        with self._cond:
+            if not self._started or self._ended:
+                ok = False
+            else:
+                self._started = False
+                self._first = time.monotonic() - self.delay  # (the wait for the delay is over: only what's held counts)
+                self._filler = proc
+                self._cond.notify_all()
+                ok = True
+        if not ok:
+            _stop(proc)
+        return ok
+
     def filled_from(self):
         """The holding screen's ffmpeg while it's going out, else None."""
         with self._cond:
