@@ -17,16 +17,18 @@ FEEDERS_KEPT = 60  # seconds a camera no layout shows any more keeps its feeder 
 class CamerasMixin:
     """The cameras' feeders and words (state on runner.Stream)."""
 
-    def _feed(self, ffmpeg: str, srcs: list[Source], size: tuple[int, int]) -> list[feeders.Feeder]:
-        """Each camera's feeder, started if it hasn't one reading it the same way already."""
+    def _feed(self, ffmpeg: str, srcs: list[Source], size: tuple[int, int], decoding: str | None = None) -> list[feeders.Feeder]:
+        """Each camera's feeder, started if it hasn't one reading it the same way already (`decoding`: where the cameras
+        are unpacked, camera_decoding.decoding())."""
         out, old = [], []
         with self._lock:
             for s in srcs:
                 f = self._feeders.get(s.key)
-                if f is None or not f.same(s.input_args, s.turn, size):
+                if f is None or not f.same(s.input_args, s.turn, size, decoding):
                     if f is not None:
                         old.append(f)
-                    f = self._feeders[s.key] = feeders.Feeder(ffmpeg, s.key, s.input_args, s.turn, size, procs.popen, aspect=s.aspect).start()
+                    f = self._feeders[s.key] = feeders.Feeder(ffmpeg, s.key, s.input_args, s.turn, size, procs.popen,
+                                                              aspect=s.aspect, decoding=decoding).start()
                 out.append(f)
         for f in old:
             f.stop()
@@ -45,7 +47,7 @@ class CamerasMixin:
         """A camera's latest picture from its feeder (a JPEG), while live and fresh; None otherwise."""
         with self._lock:
             f = self._feeders.get(key)
-        return f.latest()[0] if f else None
+        return f.picture() if f else None
 
     def _camera_states(self) -> list[dict]:
         out = []

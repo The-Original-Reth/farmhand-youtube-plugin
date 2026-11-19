@@ -63,12 +63,14 @@ def stream_fresh(plugin):
 def ffmpeg(monkeypatch, tmp_path):
     """ffmpeg in its place (fake_ffmpeg.py): what the stream starts is remembered, and nothing really runs. The picture's
     pipes are plain files (Windows has no named pipes)."""
-    from streamer.live_stream import encoders, pictures, procs, pump
+    from streamer.live_stream import camera_decoding, encoders, feeders, pictures, procs, pump
 
     fake = FakeFfmpeg()
     monkeypatch.setattr(procs, "ffmpeg_path", lambda: "/usr/bin/ffmpeg")
     monkeypatch.setattr(procs, "popen", fake)
     monkeypatch.setenv(encoders.ENCODER_SETTING, "cpu")  # no trying a real ffmpeg for an NVIDIA card
+    monkeypatch.setenv(camera_decoding.CAMERAS_SETTING, "cpu")
+    feeders.SHAPES.clear()  # (raw cameras' sizes as they last came: none yet)
     monkeypatch.setattr(pictures, "SETTLE", 0)  # (a new layout's wait for more changes: none in tests)
     monkeypatch.setattr(pump, "make_fifo", lambda path: open(path, "wb").close())
     return fake

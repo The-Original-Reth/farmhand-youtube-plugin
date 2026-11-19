@@ -8,6 +8,15 @@ thread keeps the last few (KEPT_FRAMES), numbered. One that stops is started aga
 doubling up to RETRY_MOST), back to the shortest once frames come again. Feeders belong to the time live, not to a
 layout: a new layout's picture reads the same ones, so a camera never gets a second connection.
 
+With an NVIDIA card (camera_decoding.py) a feeder unpacks and fits the camera on the card and puts out raw frames
+(raw_frames.py, as YUV4MPEG: a line saying their size, then the frames) instead of JPEGs, so neither it nor the
+picture spends the processor on JPEGs. Raw frames are all one size, so the picture's pipe for a camera is made for its
+`box`: the camera's own shape fitted in the stream's size, learnt from its first line (and remembered, SHAPES, for its
+next feeder), the shape Mainsail gives it until then. A camera whose shape turns out other than its pipe's has the
+picture handed over to a new one made for it (pump.Pump.stale, pictures.py). A camera the card can't unpack (its
+ffmpeg ended with nothing and said why, GPU_TROUBLE) is read on the processor from then on, still as raw frames, the
+others staying on the card.
+
 Why the next picture and not the latest: a camera set to 15 a second never sends them exactly 1/15 s apart (a Pi's
 encoder hands them over 60 to 80 ms apart). Taking the latest at each 1/15 s, two that come within one step would lose
 the first and show the second twice: a small stutter or two every second. Each writer instead takes the picture after
@@ -22,7 +31,8 @@ import time
 
 from datetime import datetime, timezone
 
-from . import procs
+from . import procs, raw_frames
+from .camera_decoding import GPU, HWACCEL, gpu_scale
 
 DOWN_AFTER = 10  # seconds without a frame before a camera counts as down
 RETRY_FIRST, RETRY_MOST = 5, 60  # seconds before a feeder that stopped is started again (doubling)
@@ -36,6 +46,14 @@ KEPT_FRAMES = 4  # pictures kept per camera for the writers to take in turn (at 
 # to 15.5), its square changes less often than the stream does, and the page says so.
 RATE_WINDOW = 20
 SLOW_FPS = 14.0
+# What a camera's ffmpeg says when the card can't unpack or fit it (an unusual camera, or the card gone): read on the
+# processor instead
+GPU_TROUBLE = ("cuda", "cuvid", "nvdec", "hwaccel", "hwdownload", "hardware", "impossible to convert")
+PREVIEW_EVERY = 0.25  # seconds a raw camera's preview JPEG is given again before another is made (raw_frames.to_jpeg)
+SHAPE_WAIT = 6  # seconds going live waits for raw cameras to say their size (a camera not up by then: its pipe's guessed)
+# Each raw camera's size as it last came (its camera, turn and the stream's size -> (width, height)), until the plugin
+# starts again: a new feeder's frames are taken to be that size from the start
+SHAPES: dict[tuple, tuple[int, int]] = {}
 
 
 def fit(aspect: str | None, width: int, height: int, turned: bool = False) -> tuple[int, int]:
@@ -99,16 +117,57 @@ def feeder_command(ffmpeg: str, input_args: list[str], turn: list[str], size: tu
             "-c:v", "mjpeg", "-q:v", str(JPEG_QUALITY), "-f", "image2pipe", "pipe:1"]
 
 
+def raw_feeder_command(ffmpeg: str, input_args: list[str], turn: list[str], size: tuple[int, int], gpu: bool = True) -> list[str]:
+    """The camera read, turned, fitted in `size` (its own shape kept, sides even) and put out as raw frames on stdout,
+    as YUV4MPEG (a first line saying their size), each picture once, stamped with its count (as feeder_command's).
+    `gpu`: unpacked and fitted on the NVIDIA card (fitted before it's turned, so a camera on its side is fitted the
+    other way round), only turning it left to the processor; else all on the processor."""
+    w, h = size
+    if gpu:
+        on_side = sum(t.startswith("transpose") for t in turn) % 2 == 1
+        chain, first = [*gpu_scale(*((h, w) if on_side else (w, h))), *turn], HWACCEL
+    else:
+        chain, first = [*turn, f"scale={w}:{h}:force_original_aspect_ratio=decrease", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                        f"format={raw_frames.PIX_FMT}"], []
+    chain += ["setsar=1", "settb=1/1000", "setpts=N"]
+    return [ffmpeg, "-hide_banner", "-loglevel", "warning", "-nostdin", *first, *input_args, "-an", "-vf", ",".join(chain),
+            "-fps_mode", "passthrough", "-enc_time_base", "1/1000", "-pix_fmt", raw_frames.PIX_FMT, "-f", "yuv4mpegpipe",
+            "pipe:1"]
+
+
+def wait_for_shapes(fed: list["Feeder"], most: float) -> None:
+    """Up to `most` seconds for every raw camera that's being read to say its size (its first line)."""
+    until = time.monotonic() + most
+    while time.monotonic() < until and any(f.raw and f._args and not f.box_known for f in fed):
+        time.sleep(0.1)
+
+
 class Feeder:
     """One camera, read by its own ffmpeg for as long as the stream is live (`popen(args)` starts one with its stdout
-    to read: the runner's, which tests swap). With no address (`input_args` empty) it's down until it has one."""
+    to read: the runner's, which tests swap). With no address (`input_args` empty) it's down until it has one.
+    `decoding`: GPU (camera_decoding.py), raw frames unpacked on the NVIDIA card; else JPEGs, all on the processor."""
 
     def __init__(self, ffmpeg: str, key: str, input_args: list[str], turn: list[str], size: tuple[int, int], popen,
-                 aspect: str | None = None):
+                 aspect: str | None = None, decoding: str | None = None):
         self.key, self.input_args, self.turn, self.size = key, list(input_args), list(turn), size
         # the size its frames are taken to be until the first comes (its shape as Mainsail has it, fitted in `size`)
         self.guess = fit(aspect, *size, turned=any(t.startswith("transpose") for t in turn))
-        self._args = feeder_command(ffmpeg, input_args, turn, size) if input_args else None
+        self.decoding = decoding
+        self.raw = decoding == GPU
+        # raw: the size of its frames (its camera's shape fitted in `size`), as it last came, else the guess until its
+        # first line says; box_known once it has (or had, the last time it was read)
+        self._shape_key = (tuple(input_args), tuple(turn), size)
+        self.box = SHAPES.get(self._shape_key, self.guess)
+        self.box_known = self._shape_key in SHAPES
+        self.on_card = self.raw  # (raw: unpacked on the card, until the card can't unpack this camera)
+        if not input_args:
+            self._args = self._cpu_args = None
+        elif self.raw:
+            self._args = raw_feeder_command(ffmpeg, input_args, turn, size, gpu=True)
+            self._cpu_args = raw_feeder_command(ffmpeg, input_args, turn, size, gpu=False)
+        else:
+            self._args = self._cpu_args = feeder_command(ffmpeg, input_args, turn, size)
+        self._preview: tuple[float, int, bytes] | None = None  # raw: (when, picture number, the JPEG made of it)
         self._popen = popen
         self._lock = threading.Lock()
         self._stopped = threading.Event()
@@ -125,8 +184,9 @@ class Feeder:
         self._new: collections.deque[float] = collections.deque()  # (monotonic) when each new picture came, RATE_WINDOW's worth
         self._reading_since: float | None = None  # (monotonic) when the frames of this connection began
 
-    def same(self, input_args: list[str], turn: list[str], size: tuple[int, int]) -> bool:
-        return self.input_args == list(input_args) and self.turn == list(turn) and self.size == size
+    def same(self, input_args: list[str], turn: list[str], size: tuple[int, int], decoding: str | None = None) -> bool:
+        return (self.input_args == list(input_args) and self.turn == list(turn) and self.size == size
+                and self.decoding == decoding)
 
     def start(self) -> "Feeder":
         if self._args:
@@ -144,6 +204,24 @@ class Feeder:
         with self._lock:
             fresh = self._frame is not None and time.monotonic() - self._at < DOWN_AFTER
             return (self._frame if fresh else None), self._frame_size
+
+    def picture(self) -> bytes | None:
+        """The latest frame as a JPEG (for the page's preview), while it's fresh; None when it's down. A raw camera's is
+        made from its raw frame, at most every PREVIEW_EVERY seconds."""
+        if not self.raw:
+            return self.latest()[0]
+        with self._lock:
+            fresh = self._frame is not None and time.monotonic() - self._at < DOWN_AFTER
+            frame, number, kept, size = self._frame, self._number, self._preview, self._frame_size
+        if not fresh or not size:
+            return None
+        now = time.monotonic()
+        if kept and (kept[1] == number or now - kept[0] < PREVIEW_EVERY):
+            return kept[2]
+        jpeg = raw_frames.to_jpeg(frame, size)
+        with self._lock:
+            self._preview = (now, number, jpeg)
+        return jpeg
 
     def next_after(self, number: int | None) -> tuple[bytes | None, int | None, tuple[int, int] | None]:
         """For a writer that wrote picture `number` last (None: none yet): the picture after it that's still kept (the
@@ -177,8 +255,11 @@ class Feeder:
             if frame is not None:
                 if self._down_since is not None:
                     self._down_since = None
-                return {"state": "live", "since": None, "fps": None if fps is None else round(fps, 1),
-                        "slow": fps is not None and fps < SLOW_FPS}
+                out = {"state": "live", "since": None, "fps": None if fps is None else round(fps, 1),
+                       "slow": fps is not None and fps < SLOW_FPS}
+                if self.raw:  # where it's unpacked: "gpu" (the NVIDIA card) or "cpu" (the card couldn't)
+                    out["decoding"] = GPU if self.on_card else "cpu"
+                return out
             if self._frame is None and time.monotonic() - self._started < DOWN_AFTER and self._args:
                 return {"state": "starting", "since": None}
             if self._down_since is None:
@@ -190,9 +271,9 @@ class Feeder:
     def _run(self) -> None:
         wait = RETRY_FIRST
         while not self._stopped.is_set():
-            got = False
+            got, heard = False, []
             try:
-                proc = self._popen(self._args, out=True)
+                proc = self._popen(self._args if self.on_card or not self.raw else self._cpu_args, out=True)
             except OSError as e:
                 self.said.append(f"ffmpeg couldn't be started: {e.strerror or e}")
                 proc = None
@@ -202,17 +283,27 @@ class Feeder:
                 if self._stopped.is_set():
                     procs.end(proc)
                     return
-                threading.Thread(target=self._listen, args=(proc,), name=f"stream-feeder-said {self.key}", daemon=True).start()
+                listener = threading.Thread(target=self._listen, args=(proc, heard), name=f"stream-feeder-said {self.key}", daemon=True)
+                listener.start()
                 got = self._read(proc)
                 procs.end(proc)
+                listener.join(timeout=2)
             if self._stopped.is_set():
                 return
+            if self.on_card and not got and any(w in line.lower() for line in heard for w in GPU_TROUBLE):
+                self.on_card = False  # the card can't unpack this camera: the processor, from now on, at once
+                self.said.append("The NVIDIA card couldn't unpack this camera: it's read on the processor instead.")
+                print(f"stream: camera {self.key} read on the processor: the NVIDIA card couldn't unpack it "
+                      f"({heard[-1] if heard else ''})", flush=True)
+                continue
             self.restarts += 1
             wait = RETRY_FIRST if got else min(RETRY_MOST, wait * 2 if self.restarts > 1 else wait)
             self._stopped.wait(wait)
 
     def _read(self, proc) -> bool:
         """Frames kept as they come, until the camera's ffmpeg ends. Whether any came."""
+        if self.raw:
+            return self._read_raw(proc)
         buffer, got = bytearray(), False
         while not self._stopped.is_set():
             try:
@@ -230,10 +321,36 @@ class Feeder:
                 break
         return got
 
+    def _read_raw(self, proc) -> bool:
+        """Raw frames (YUV4MPEG: its first line says their size, each frame after a FRAME line), kept as they come until
+        the camera's ffmpeg ends. Whether any came."""
+        try:
+            size = raw_frames.y4m_size(_line(proc.stdout))
+        except (OSError, ValueError):
+            size = None
+        if size is None:
+            return False
+        with self._lock:
+            self.box, self.box_known = size, True
+            SHAPES[self._shape_key] = size
+        need, got = raw_frames.frame_bytes(size), False
+        while not self._stopped.is_set():
+            try:
+                if not _line(proc.stdout).startswith(b"FRAME"):
+                    return got
+                frame = _exactly(proc.stdout, need)
+            except (OSError, ValueError):
+                return got
+            if frame is None:
+                return got
+            self._keep(frame, first=not got)
+            got = True
+        return got
+
     def _keep(self, frame: bytes, first: bool = False) -> None:
         """A picture as it comes from the camera's ffmpeg (`first`: its connection's first, its frame rate counted from
         here): kept, numbered, as the latest."""
-        size = jpeg_size(frame)
+        size = self.box if self.raw else jpeg_size(frame)
         now = time.monotonic()
         with self._lock:
             if first:
@@ -247,8 +364,42 @@ class Feeder:
             if size:
                 self._frame_size = size
 
-    def _listen(self, proc) -> None:
+    def _listen(self, proc, heard: list[str] | None = None) -> None:
         for line in proc.stderr or []:
             line = line.strip() if isinstance(line, str) else line.decode("utf-8", "replace").strip()
             if line:
                 self.said.append(line)
+                if heard is not None:
+                    heard.append(line)
+
+
+def _line(out, most: int = 256) -> bytes:
+    """One line of a YUV4MPEG stream (its newline left off); b"" at its end."""
+    got = bytearray()
+    while len(got) < most:
+        b = out.read(1)
+        if not b:
+            return b""
+        if b == b"\n":
+            return bytes(got)
+        got += b
+    raise ValueError("not YUV4MPEG")
+
+
+def _exactly(out, need: int) -> bytearray | None:
+    """`need` bytes read straight into a new buffer (kept as it is, never changed); None when the stream ends first."""
+    frame = bytearray(need)
+    into = getattr(out, "readinto", None)
+    with memoryview(frame) as view:
+        n = 0
+        while n < need:
+            if into:
+                r = into(view[n:])
+            else:
+                chunk = out.read(need - n)
+                r = len(chunk)
+                view[n:n + r] = chunk
+            if not r:
+                return None
+            n += r
+    return frame

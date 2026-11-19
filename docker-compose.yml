@@ -39,8 +39,9 @@ services:
     #   STREAM_FOLDER_SHOWN_AS: '\\nas\share\Farmhand\stream'   # the stream folder as people reach it, shown on the page
     #   STREAM_CLIPS_SHOWN_AS: '\\nas\share\Farmhand\YouTube clips'   # the clips folder as people reach it, on the page
     #   FARMHAND_STREAM_ENCODER: auto                            # auto (default), nvenc or cpu
+    #   FARMHAND_STREAM_CAMERAS: auto                            # auto (default: on the NVIDIA card when it works) or cpu
 
-    # An NVIDIA card: the stream is compressed on the card, leaving the processor for the cameras. The machine needs
+    # An NVIDIA card: the cameras are unpacked and the stream compressed on the card, leaving the processor free. The machine needs
     # the NVIDIA driver's libraries (on a Proxmox container, at the host's driver version). Remove the # signs below.
     # devices:
     #   - /dev/nvidia0
@@ -51,6 +52,7 @@ services:
     #   - /usr/lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1:ro
     #   - /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-encode.so.1:ro
     #   - /usr/lib/x86_64-linux-gnu/libnvcuvid.so.1:/usr/lib/x86_64-linux-gnu/libnvcuvid.so.1:ro
+    #   - /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1:ro
 
 volumes:
   stream-data:

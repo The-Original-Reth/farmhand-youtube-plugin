@@ -29,6 +29,7 @@ from .broadcast import Broadcast, own_stream, title_on_active
 from .constants import DEFAULT_RESOLUTION, DESTINATIONS, KEPT_LINES, RESOLUTIONS, STREAM_KEY_KEY
 from .choices import settings
 from .encoders import encoder
+from .camera_decoding import decoding
 from .buffer import Buffer
 from .relay import Relay
 from .sources import sources
@@ -47,6 +48,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
     def __init__(self):
         self._lock = threading.Lock()
         self._encoder: str | None = None
+        self._decoding: tuple[str, str | None] | None = None  # where the cameras are unpacked, and why not the card
         self._run_started: float | None = None  # when the picture ffmpeg going out started (monotonic)
         self._wanted = threading.Event()
         self._proc = None  # the picture ffmpeg going out
@@ -68,6 +70,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         self._player: music.Player | None = None  # the music, while live
         self._trying: tuple[int, float] | None = None  # a volume being tried on the page, not saved: (volume, until when)
         self._warming = None  # a new layout's picture ffmpeg, warming up beside the one going out
+        self._pumps: dict = {}  # each picture ffmpeg's pump (pictures.py: a raw camera's pipe made for another size)
         self._changing = False  # a new layout is on its way (settling, or warming up)
         self._cache: str | None = None  # slideshow screens put together this time live, reused by later layouts
         self._broadcast: Broadcast | None = None  # signed in: this time live's broadcast on YouTube
@@ -99,6 +102,10 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
                 "error": self._error,
                 "title": dict(self._title) if self._title else None,
                 "encoder": self._encoder,  # "nvenc" (an NVIDIA card) or "cpu", while live; None otherwise
+                # where the cameras are unpacked and fitted, while live: "gpu" (the NVIDIA card) or "cpu"; None otherwise
+                "camera_decoding": self._decoding[0] if self._decoding and wanted else None,
+                # why not on the NVIDIA card (it was tried and didn't work), or None
+                "camera_decoding_note": self._decoding[1] if self._decoding and wanted else None,
                 "resolution": self._resolution if wanted else None,  # the size going out (set when it went live)
                 # how long the picture going out has run, in seconds (None while it isn't going out)
                 "running_for": round(time.monotonic() - self._run_started, 2) if on_air and self._run_started else None,
@@ -214,7 +221,9 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         with self._lock:
             resolution, cache = self._resolution, self._cache  # (this time live's, whatever is saved now)
         size = RESOLUTIONS.get(resolution or DEFAULT_RESOLUTION, RESOLUTIONS[DEFAULT_RESOLUTION])[:2]
-        fed = self._feed(ffmpeg, srcs, size)
+        cams = decoding(ffmpeg)
+        fed = self._feed(ffmpeg, srcs, size, cams[0])
+        feeders.wait_for_shapes(fed, feeders.SHAPE_WAIT)  # (raw cameras: their pipes made for the size they come at)
         enc = encoder(ffmpeg)
         folder, files, make = layout_picture.prepare(db, chosen, ffmpeg, url, srcs, fed, enc, resolution, cache)
 
@@ -223,6 +232,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
             self._picture += 1
             picture = self._picture
             self._encoder = enc
+            self._decoding = cams
             self._labels = [s.label for s in srcs]
             self._showing = [(s.key, s.label) for s in srcs]
             self._farmhand_note = note
@@ -399,6 +409,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
             folder, self._dir = self._dir, None
             self._started_at = None
             self._encoder = None
+            self._decoding = None
             self._resolution = None
             self._run_started = None
             self._title = None

@@ -24,6 +24,10 @@ class FakeFfmpeg:
         self.feeders: list[list[str]] = []
         self.feeder_procs: list = []
         self.down: set[str] = set()  # cameras (their addresses) that are off: their feeders end at once, with nothing
+        # cameras (their addresses) an NVIDIA card can't unpack: a feeder reading one on the card ends at once, saying so
+        self.gpu_trouble: set[str] = set()
+        # the size a raw camera's frames come at (its address -> (width, height)); else the size it's fitted to
+        self.shapes: dict[str, tuple[int, int]] = {}
         # cameras (their addresses) showing less than they send: each new picture is put out this many times, as a camera
         # sending the same picture again does (others send a new picture every frame)
         self.repeat: dict[str, int] = {}
@@ -33,7 +37,7 @@ class FakeFfmpeg:
     def __call__(self, args, feed=False, out=False):
         if "-vf" in args and args[-1] == "pipe:1":  # a camera's feeder
             url = args[args.index("-i") + 1]
-            proc = _Feeder(self, url)
+            proc = _Feeder(self, url, args)
             self.feeders.append(args)
             self.feeder_procs.append(proc)
             return proc
@@ -168,11 +172,50 @@ class _FeederOut:
         return picture
 
 
+class _RawFeederOut:
+    """A raw feeder's stdout (the cameras unpacked on an NVIDIA card): YUV4MPEG, its first line saying `size`, then a
+    raw frame every 20 ms while its camera is up, two different ones in turn, handed over in pieces as a pipe does; ends
+    as _FeederOut's does."""
+
+    def __init__(self, fake, url, ended, size):
+        self._fake, self._url, self._ended = fake, url, ended
+        self._frame_bytes = size[0] * size[1] * 3 // 2
+        self._left, self._n = f"YUV4MPEG2 W{size[0]} H{size[1]} F15:1 Ip A1:1 C420mpeg2\n".encode(), 0
+
+    def read(self, n=-1):
+        import time
+
+        if self._ended.is_set() or self._url in self._fake.down:
+            self._ended.set()
+            return b""
+        if not self._left:
+            time.sleep(0.02)
+            self._left = b"FRAME\n" + bytes([16 + self._n % 2]) * self._frame_bytes
+            self._n += 1
+        n = 65536 if n is None or n < 0 else min(n, 65536)
+        piece, self._left = self._left[:n], self._left[n:]
+        return piece
+
+
 class _Feeder(_Proc):
-    def __init__(self, fake, url):
+    def __init__(self, fake, url, args=()):
         super().__init__([], False)
-        self.stdout = _FeederOut(fake, url, self._ended)
-        self.stderr = iter(["Connection refused\n"] if url in fake.down else [])
+        on_card = "-hwaccel" in args
+        trouble = on_card and url in fake.gpu_trouble
+        if "yuv4mpegpipe" in args:
+            chain = args[args.index("-vf") + 1]
+            target = next(p for p in chain.split(",") if p.startswith(("scale_cuda=", "scale=")) and "iw" not in p)
+            w, h = (int(x) for x in target.split("=")[1].split(":")[:2])
+            size = fake.shapes.get(url, (w, h))  # (as it comes: the size it's fitted to, unless it's said otherwise)
+            self.stdout = _RawFeederOut(fake, "<trouble>" if trouble else url, self._ended, size)
+            if trouble:
+                fake.down.add("<trouble>")
+        else:
+            self.stdout = _FeederOut(fake, url, self._ended)
+        said = ["Connection refused\n"] if url in fake.down else []
+        if trouble:
+            said = ["[h264 @ 0x1] Failed setup for format cuda: hwaccel initialisation returned error.\n"]
+        self.stderr = iter(said)
 
 
 def frame_at(seconds: float) -> bytes:
