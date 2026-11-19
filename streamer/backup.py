@@ -74,6 +74,12 @@ def reset() -> None:
         _state.update(pushed=None, saved_at=None, error=None, wait_until=0.0)
 
 
+def _took(digest: str, saved_at: str | None) -> None:
+    """Farmhand has these settings (`digest`), made at `saved_at`: nothing to push until they change."""
+    with _lock:
+        _state.update(pushed=digest, saved_at=saved_at, error=None, wait_until=0.0)
+
+
 def _failed(error: str, wait: float = 0.0) -> str:
     with _lock:
         _state.update(error=error, wait_until=time.monotonic() + wait if wait else 0.0)
@@ -108,8 +114,7 @@ def push(db: Store | None = None, force: bool = False) -> str:
         if e.kind in ("down", "busy"):
             return _failed(f"Couldn't give Farmhand a copy of these settings: {e.message}")
         return _failed(f"Couldn't give Farmhand a copy of these settings: {e.message}", SLOW)
-    with _lock:
-        _state.update(pushed=digest, saved_at=(answer or {}).get("saved_at") or backup["saved_at"], error=None, wait_until=0.0)
+    _took(digest, (answer or {}).get("saved_at") or backup["saved_at"])
     return "pushed"
 
 
@@ -153,8 +158,7 @@ def _restored(db: Store, saved_at: str | None) -> None:
     """What the store holds now is Farmhand's copy: not pushed back (it has it), and things read once read again."""
     from . import stream_media
 
-    with _lock:
-        _state.update(pushed=_digest(settings_of(db)), saved_at=saved_at, error=None, wait_until=0.0)
+    _took(_digest(settings_of(db)), saved_at)
     stream_media.forget()  # (the stream folder may be another one now: the restored save location's)
 
 

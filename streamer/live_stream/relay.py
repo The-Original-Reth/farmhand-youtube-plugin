@@ -75,8 +75,8 @@ def _read_packets(stream, size: int = CHUNK) -> bytes:
 
 
 class Relay:
-    """Passes one picture ffmpeg's output on to the sender at a time. `out`: the sender's stdin (swapped with set_out when
-    the sender is started again)."""
+    """Passes one picture ffmpeg's output on to the sender at a time. `out`: what it's written to, the delay's buffer
+    (buffer.py), which the sender is given to."""
 
     def __init__(self, out=None):
         self._lock = threading.Lock()
@@ -85,10 +85,6 @@ class Relay:
         self._next = None  # the one to switch to at its first keyframe
         self._switched = threading.Event()
         self._last: float | None = None  # the time of the last frame passed on (its PTS, seconds)
-
-    def set_out(self, out) -> None:
-        with self._lock:
-            self._out = out
 
     def start(self, picture) -> None:
         """Pass this picture ffmpeg on from now (the first, or one started after the last one stopped)."""
@@ -166,5 +162,5 @@ class Relay:
                 try:
                     out.write(data)
                     out.flush()
-                except (OSError, ValueError):  # the sender has ended: it's started again, with set_out
+                except (OSError, ValueError):  # (what it writes to has closed)
                     pass
