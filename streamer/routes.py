@@ -141,12 +141,18 @@ def get_picture(name: str, db: Store = Depends(get_db)):
     return _picture_answer(*_media(lambda: stream_media.picture(db, None, name)))
 
 
+async def _add_each(files: list[UploadFile], most: int, add) -> None:
+    """Each uploaded file read (`most` bytes and one more, so one too big is told so) and added: add(name, data), its
+    errors as answers. Stops at the first that can't be added (those before it stay)."""
+    for file in files:
+        data = await file.read(most + 1)
+        _media(lambda: add(file.filename or "", data))
+
+
 @router.post("/pictures", status_code=201)
 async def add_pictures(files: list[UploadFile] = File(...), db: Store = Depends(get_db)):
     """Pictures (PNG, JPEG, WebP or SVG, under 10 MB each) into the stream folder's images. Answers the page."""
-    for file in files:
-        data = await file.read(stream_media.PICTURE_MAX + 1)
-        _media(lambda: stream_media.add_picture(db, None, file.filename or "", data))
+    await _add_each(files, stream_media.PICTURE_MAX, lambda name, data: stream_media.add_picture(db, None, name, data))
     return live_stream.page(db)
 
 
@@ -213,9 +219,8 @@ def get_font(key: str):
     """A font a square's words can be written in, for the page to show them as the stream does. 404 when the server
     doesn't have it (the stream then writes in its own font)."""
     path = live_stream.font_file(key)
-    if key not in live_stream.FONTS or path == live_stream.FONT and key != "dejavu-sans":
-        raise HTTPException(status_code=404, detail="That font isn't in the Stream plugin.")
-    if not os.path.isfile(path):
+    missing = key not in live_stream.FONTS or (path == live_stream.FONT and key != "dejavu-sans")  # (no file of its own)
+    if missing or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="That font isn't in the Stream plugin.")
     kind = "font/otf" if path.endswith(".otf") else "font/ttf"
     return FileResponse(path, media_type=kind, headers={"Cache-Control": "max-age=86400"})
@@ -229,9 +234,7 @@ def get_slideshow_picture(name: str, picture: str, db: Store = Depends(get_db)):
 @router.post("/slideshows/{name}/pictures", status_code=201)
 async def add_slideshow_pictures(name: str, files: list[UploadFile] = File(...), db: Store = Depends(get_db)):
     """Pictures into a slideshow's folder (made when it isn't there). While live and it's shown, the stream starts again."""
-    for file in files:
-        data = await file.read(stream_media.PICTURE_MAX + 1)
-        _media(lambda: stream_media.add_picture(db, name, file.filename or "", data))
+    await _add_each(files, stream_media.PICTURE_MAX, lambda filename, data: stream_media.add_picture(db, name, filename, data))
     _restart_if_used(db, name)
     return live_stream.page(db)
 
@@ -282,9 +285,7 @@ def get_track(name: str, db: Store = Depends(get_db)):
 @router.post("/music", status_code=201)
 async def add_tracks(files: list[UploadFile] = File(...), db: Store = Depends(get_db)):
     """MP3s into the music (under 50 MB each; bigger ones can be copied in by hand)."""
-    for file in files:
-        data = await file.read(stream_media.TRACK_MAX + 1)
-        _media(lambda: stream_media.add_track(db, file.filename or "", data))
+    await _add_each(files, stream_media.TRACK_MAX, lambda name, data: stream_media.add_track(db, name, data))
     return live_stream.page(db)
 
 
