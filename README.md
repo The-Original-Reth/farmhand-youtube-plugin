@@ -59,6 +59,9 @@ What it adds over the Stream page older Farmhands had built in:
   how far it's got, and Farmhand is asked every few seconds meanwhile. Tracks Stream control plays from this plugin's
   own music folder are copied from there, never fetched back through Farmhand. The stream key, the YouTube sign-in and the
   YouTube settings stay the plugin's, in its YouTube settings window, which Stream control opens from Farmhand.
+- **A copy of its settings in Farmhand**: with `stream:backup`, Farmhand keeps a copy of the plugin's settings in its
+  own settings folder on the NAS, so a plugin rebuilt from scratch can be given them back (see
+  [Settings backup in Farmhand](#settings-backup-in-farmhand)).
 
 | Path | What it is |
 |---|---|
@@ -67,6 +70,7 @@ What it adds over the Stream page older Farmhands had built in:
 | `streamer/stream_media.py`, `youtube_live.py`, `routes.py` | The stream folder, YouTube sign-in and the page's API |
 | `streamer/store.py`, `farm.py`, `migrate.py`, `layouts.py`, `app.py` | The plugin's own: its settings file, reading Farmhand, the one-off move, saved layouts, the web server |
 | `streamer/live_stream/clips.py`, `streamer/clip_routes.py` | Clips: what went to YouTube kept five minutes, and saved as MP4s |
+| `streamer/backup.py`, `streamer/backup_routes.py` | The copy of its settings kept in Farmhand, and Restore |
 | `page/` | The page (first copied from Farmhand's own Stream page), a small Vite build of its own (`npm run build` puts it in `streamer/web/`) |
 | `tests/` | Tests against stand-ins for Farmhand's plugin API and ffmpeg (`python -m pytest -q`) |
 
@@ -100,6 +104,24 @@ Until a save location is set, the plugin uses the folders its container is given
 did, so a machine set up that way carries on unchanged. Pictures added on the page are written to the stream folder;
 ones copied in by hand count too (press **Resync**). Moving over from Farmhand's old Stream page, choose the same
 stream folder that page used, so the squares find their pictures.
+
+## Settings backup in Farmhand
+
+Farmhand keeps a copy of everything set up on the plugin, in Farmhand's own settings folder on the NAS: the stream's
+settings, **the stream key**, **the YouTube sign-in** (the Google client and its secret, the channel), the saved
+layouts, the clip length and the save location (its share and login name). Every 30 seconds the plugin looks whether
+any of it changed and, when it has, gives Farmhand the new copy (once after every start, too). The copy only ever
+travels over Farmhand's plugin API, with the plugin's token, and the plugin never prints it.
+
+Left out, and never overwritten by a restore: whether the stream is live now (a rebuilt plugin doesn't go live by
+itself), the save location's **password** (Farmhand never keeps a share's password, so type it again on the plugin's
+settings after restoring) and the cameras last heard of from Farmhand (it's asked for them again within a minute).
+
+It needs the `stream:backup` permission, **Allow**ed for the plugin on
+Farmhand's **Plugins** page; until then the plugin's page says Farmhand isn't keeping a copy. To give a rebuilt plugin
+its settings back, press **Restore** by it on Farmhand's **Plugins** page: the plugin fetches the copy from Farmhand
+itself (`POST /api/farmhand-backup/restore`). A stream that's live keeps going as it is; what was restored is used
+from the next **Go live**.
 
 ## Clips
 

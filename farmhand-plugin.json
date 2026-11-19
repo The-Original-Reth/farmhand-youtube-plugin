@@ -1,14 +1,15 @@
 {
   "id": "stream",
   "name": "YouTube Stream",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "farmhand_api": "1",
   "author": "Farmhand",
   "homepage": "https://github.com/The-Original-Reth/farmhand-youtube-plugin",
   "port": 8080,
   "page": { "menu": "YouTube", "icon": "youtube", "path": "/" },
-  "permissions": ["cameras:read", "prints:read", "stream:migrate", "stream:read"],
+  "permissions": ["cameras:read", "prints:read", "stream:backup", "stream:migrate", "stream:read"],
   "stream_control": { "path": "/api/stream-control", "site": "YouTube" },
+  "backup": { "restore": "/api/farmhand-backup/restore" },
   "settings_page": "/?view=settings",
   "health": "/health"
 }

@@ -85,7 +85,9 @@ def test_at_first_start_it_brings_them_over_only_with_the_permission(plugin, far
 
 def test_manifest_and_health(api, farmhand):
     m = api.get("/manifest").json()
-    assert m["id"] == "stream" and set(m["permissions"]) == {"cameras:read", "prints:read", "stream:migrate", "stream:read"}
+    assert m["id"] == "stream" and set(m["permissions"]) == {"cameras:read", "prints:read", "stream:backup", "stream:migrate",
+                                                           "stream:read"}
+    assert m["backup"] == {"restore": "/api/farmhand-backup/restore"}
     assert api.get("/health").text == "ok"
     farm.cameras(store.store())
     config.settings.farmhand_token = "wrong"

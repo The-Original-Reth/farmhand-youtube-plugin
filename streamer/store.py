@@ -3,7 +3,8 @@ The plugin's own settings: <STREAM_DATA>/settings.json, a file in its own volume
 Farmhand's app_settings table held for the Stream page, under the same keys (live_stream, live_stream_key,
 youtube_client, youtube_refresh_token, youtube_channel, youtube_stream_id), plus the saved layouts, the cameras last
 heard of and what was last live. The file is readable only by the plugin (mode 600): the stream key and the YouTube
-sign-in are in it, and the plugin's API never answers them.
+sign-in are in it, and the plugin's API never answers them (they leave it only as the copy Farmhand keeps, over the
+plugin API: backup.py).
 
 The engine code copied from Farmhand takes a `db` everywhere: here that is the Store (its type is still called
 Store in those files, so they differ from Farmhand's as little as possible). put() changes it in memory; commit()
@@ -45,6 +46,18 @@ class Store:
                 self._values.pop(key, None)
             else:
                 self._values[key] = value
+
+    def snapshot(self) -> dict[str, str]:
+        """Every value at once, as a copy (the settings backup reads them all together, never half-changed)."""
+        with self._lock:
+            return dict(self._values)
+
+    def replace(self, values: dict[str, str], keep: tuple[str, ...]) -> None:
+        """Every value but those in `keep` replaced by `values` (one missing from `values` goes), in one go: a restored
+        backup. `keep` stay as they are, whatever `values` says of them. Not written until commit()."""
+        with self._lock:
+            kept = {k: v for k, v in self._values.items() if k in keep}
+            self._values = {**{k: v for k, v in values.items() if k not in keep}, **kept}
 
     def commit(self) -> None:
         with self._lock:

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 
-from . import camera_watch, config, migrate, save_location, store, stream_control
+from . import backup, camera_watch, config, migrate, save_location, store, stream_control
 from .app import app
 from .live_stream import stream
 
@@ -19,10 +19,12 @@ async def _running(_app):
     camera_watch.start()  # the cameras kept in step with Farmhand (the Clip drop-down follows cameras added or removed)
     stream_control.start()  # Farmhand's Stream control followed, while it takes over this plugin's layout
     stream_control.first_answer(15)  # (so going live again sends the layout Farmhand says)
+    backup.start()  # its settings copied to Farmhand whenever they change (stream:backup), so a rebuilt plugin gets them back
     stream.resume(s, store.session_factory)  # live before the restart: live again
     yield
     # (only the container stopping: it goes live again when it starts, on the same YouTube broadcast, so that's left live)
     camera_watch.stop()
+    backup.stop()
     stream_control.stop()
     stream.stop(forget=False, end_broadcast=False)
 
