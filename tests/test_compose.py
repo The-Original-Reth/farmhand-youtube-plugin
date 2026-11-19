@@ -14,6 +14,7 @@ def test_compose_file_is_valid_and_builds_the_plugin_from_its_own_repository():
     stream = data["services"]["stream"]
     assert stream["build"] == "https://github.com/The-Original-Reth/farmhand-youtube-plugin.git#main"
     assert stream["ports"] == ["8080:8080"]
+    assert stream["init"] is True  # (ffmpeg's finished processes reaped: a restart never hangs)
     assert stream["env_file"] == [{"path": "stream.env", "required": False}]
     assert "stream-data:/data" in stream["volumes"]
     assert "stream-data" in data["volumes"]
