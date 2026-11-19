@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 import urllib.parse
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,6 +58,10 @@ class FakeFarmhand:
         self.slideshow_order: dict[str, list[str]] = {}  # a slideshow's pictures and blanks in order (else by name)
         self.send_stamps = True  # media.stamps in the design's answer (False: a Farmhand from before them)
         self.files_busy_for = 0  # the next this-many file downloads get 429 (Retry-After: 1)
+        self.file_delay = 0.0  # seconds each file download takes (a big MP3 passed on from another plugin, say)
+        # tracks Stream control plays from a stream plugin's own folder (music_from): {name: that plugin's id}. Farmhand
+        # stamps them "<plugin id>:<name>" (it passes them on from that plugin), not by size and time
+        self.music_from: dict[str, str] = {}
         self.handed_over_at: str | None = None
         self.down = False  # True: nothing answers (Farmhand stopped)
         self.permissions = set(EVERYTHING)
@@ -171,7 +176,7 @@ class FakeFarmhand:
             media["stamps"] = {
                 **{f"images/{n}": stamp(d) for n, d in files["pictures"].items()},
                 **{f"slideshows/{show}/{n}": stamp(d) for show, f in files["slideshows"].items() for n, d in f.items()},
-                **{f"music/{n}": stamp(d) for n, d in files["music"].items()},
+                **{f"music/{n}": f"{self.music_from[n]}:{n}" if n in self.music_from else stamp(d) for n, d in files["music"].items()},
             }
         return {"enabled": True, "design": self.design, "media": media}
 
@@ -196,6 +201,8 @@ class FakeFarmhand:
                 data = files["slideshows"].get(parts[1], {}).get(parts[3])
         if data is None:
             return self.send(h, 404, {"detail": "That file isn't there."})
+        if self.file_delay:
+            time.sleep(self.file_delay)
         h.send_response(200)
         h.send_header("Content-Type", "application/octet-stream")
         h.send_header("Content-Length", str(len(data)))
