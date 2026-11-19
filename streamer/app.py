@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from . import clip_routes, farm, page_routes, save_location_routes
+from . import backup_routes, clip_routes, farm, page_routes, save_location_routes
 from .routes import control, router
 
 HERE = Path(__file__).resolve().parent
@@ -29,6 +29,7 @@ app.include_router(control)
 app.include_router(page_routes.router)
 app.include_router(clip_routes.router)
 app.include_router(save_location_routes.router)
+app.include_router(backup_routes.router)
 
 
 def read_manifest() -> dict:

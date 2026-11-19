@@ -49,7 +49,7 @@ def page(db: Store) -> dict:
     """Everything the Stream page shows: {settings (the plugin's own), stream_control, media (the stream folder's pictures, slideshows and music, stream_media.media),
     status, destinations, resolutions, fonts (what a square's words can be written in), youtube, test_destination (where
     the stream goes instead of YouTube while the plugin is being tried out, or None)}."""
-    from .. import config, stream_control
+    from .. import backup, config, stream_control
 
     return {
         "test_destination": config.settings.test_destination,
@@ -62,4 +62,5 @@ def page(db: Store) -> dict:
         "resolutions": [{"key": k, "label": RESOLUTION_LABELS[k]} for k in RESOLUTIONS],
         "fonts": [{"key": k, "label": v[0], "generic": v[2]} for k, v in FONTS.items()],
         "youtube": youtube_live.account(db),
+        "backup": backup.status(),  # Farmhand's copy of these settings: {saved_at (when it last took them), error}
     }
