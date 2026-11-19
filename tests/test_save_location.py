@@ -106,3 +106,18 @@ def test_the_network_path_is_written_as_windows_writes_it():
     assert save_location.network_path({"address": "//192.168.10.240/3d_Printing_Elves/Farmhand"}, "YouTube clips") == \
         "\\\\192.168.10.240\\3d_Printing_Elves\\Farmhand\\YouTube clips"
     assert save_location.network_path({"address": "smb://nas/farm"}) == "\\\\nas\\farm"
+
+
+def test_an_smb_save_location_gives_up_on_a_nas_that_stops_answering():
+    """soft and a short keep-alive check: a NAS that stops answering yields an error in about 20 s, rather than holding
+    whatever touched it (which kept the container from stopping when it was updated)."""
+    from streamer import mounts
+
+    spec = mounts.ShareSpec(protocol="smb", server="192.168.10.240", share="Elves/Farmhand", username=None, password=None,
+                            domain=None, version="3.0")
+    argv = mounts.build_mount_command(spec, "/mnt/save")
+    opts = argv[argv.index("-o") + 1].split(",")
+    assert "soft" in opts and f"echo_interval={mounts.ECHO_SECONDS}" in opts and mounts.ECHO_SECONDS <= 15
+    nfs = mounts.build_mount_command(mounts.ShareSpec(protocol="nfs", server="nas", share="/export", username=None,
+                                                      password=None, domain=None, version="4"), "/mnt/save")
+    assert "soft" in nfs[nfs.index("-o") + 1].split(",")

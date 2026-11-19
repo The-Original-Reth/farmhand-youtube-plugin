@@ -31,7 +31,11 @@ sudo mkdir -p /opt/farmhand-stream && cd /opt/farmhand-stream
 sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/docker-compose.yml
 ```
 
-It's ready as it is. It already gives the plugin's container what it needs to connect to the NAS itself
+```bash
+sudo curl -fsSLo update.sh https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/update.sh
+```
+
+It's ready as it is (`update.sh` is for updating it later: see "Updating"). It already gives the plugin's container what it needs to connect to the NAS itself
 (`cap_add: SYS_ADMIN, DAC_READ_SEARCH` and `security_opt: apparmor:unconfined`, as Farmhand's own container has).
 
 Only for an **NVIDIA card**, edit it and uncomment the `devices:` and library lines (driver set-up: the
@@ -117,10 +121,19 @@ settings**) or paste a stream key, choose the grid and cameras, and press **Go l
 ## Updating
 
 ```bash
-cd /opt/farmhand-stream && sudo docker compose up -d --build
+cd /opt/farmhand-stream && sudo sh update.sh
 ```
 
-The broadcast stays live: YouTube shows the holding screen for about a minute while the delay fills again.
+`update.sh` builds the new version while the stream keeps going, then swaps the container, and goes on trying until
+the new one is up. If the old one can't be stopped at once (a process in it waiting on a NAS that's slow to answer),
+it waits and tries again rather than leaving the stream down. The broadcast stays live: YouTube shows the holding
+screen for about a minute while the delay fills again.
+
+A machine set up before `update.sh` was there fetches it once, beside its compose file:
+
+```bash
+cd /opt/farmhand-stream && sudo curl -fsSLo update.sh https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/update.sh
+```
 
 ### A machine set up before the plugin had its own save location
 

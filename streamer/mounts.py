@@ -31,6 +31,7 @@ MOUNT_TIMEOUT_SECONDS = 30
 CAP_SYS_ADMIN_BIT = 21
 CAP_DAC_READ_SEARCH_BIT = 2  # mount.cifs refuses to run without it, on top of SYS_ADMIN
 _MOUNT_TOOLS = {"smb": "mount.cifs", "nfs": "mount.nfs"}
+ECHO_SECONDS = 10  # an SMB share's keep-alive check (build_mount_command): two missed, and it gives up
 
 
 class MountError(ValueError):
@@ -271,7 +272,11 @@ def is_mounted(path: str | os.PathLike) -> bool:
 
 def build_mount_command(spec: ShareSpec, mount_point: str | os.PathLike, credentials_file: str | None = None) -> list[str]:
     if spec.protocol == "smb":
-        opts = ["uid=0", "gid=0", "file_mode=0664", "dir_mode=0775", "iocharset=utf8"]
+        # soft + echo_interval: a NAS that stops answering yields an error within about 20 s (two missed 10 s checks)
+        # instead of holding whatever touched it, the default being a check a minute. A process held on the share
+        # can't be stopped, so one held for minutes kept the container from stopping when it was updated, and the
+        # stream down until it was started by hand.
+        opts = ["uid=0", "gid=0", "file_mode=0664", "dir_mode=0775", "iocharset=utf8", "soft", f"echo_interval={ECHO_SECONDS}"]
         if spec.version:
             opts.append(f"vers={spec.version}")
         opts.append(f"credentials={credentials_file}" if credentials_file else "guest")
