@@ -338,7 +338,7 @@ control = APIRouter(prefix="/api/stream-control", tags=["stream control"])
 def control_status() -> dict:
     status = live_stream.stream.status()
     youtube = status.get("youtube") or {}
-    error = status["error"] or (stream_control.note() if status["live"] and stream_control.design() is not None else None)
+    error = status["error"] or (stream_control.problem() if status["live"] and stream_control.design() is not None else None)
     return {"live": status["live"], "following": stream_control.design() is not None, "error": error,
             "watch_url": youtube.get("watch_url") if status["live"] else None}
 

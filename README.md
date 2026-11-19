@@ -54,7 +54,10 @@ What it adds over the Stream page older Farmhands had built in:
   Stream control's Go live and Stop start and stop it (`/api/stream-control`). Its own layout stays saved and comes
   back as soon as Stream control lets go; the page shows only **Controlled by Stream control** meanwhile (the plugin's
   own on/off switch is set aside until then). Only the files that are new or changed in Farmhand (its `media.stamps`)
-  are fetched again, and Farmhand asking it to slow down is waited out. The stream key, the YouTube sign-in and the
+  are fetched again, and Farmhand asking it to slow down is waited out. They're copied in the background: the
+  pictures first, then the design is followed, then the music, which the stream picks up as it plays; the page says
+  how far it's got, and Farmhand is asked every few seconds meanwhile. Tracks Stream control plays from this plugin's
+  own music folder are copied from there, never fetched back through Farmhand. The stream key, the YouTube sign-in and the
   YouTube settings stay the plugin's, in its YouTube settings window, which Stream control opens from Farmhand.
 
 | Path | What it is |

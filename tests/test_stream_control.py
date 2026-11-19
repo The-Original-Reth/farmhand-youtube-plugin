@@ -7,6 +7,7 @@ the stream through /api/stream-control.
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -192,6 +193,85 @@ def test_files_that_cant_be_copied_are_said_in_one_short_line(api, farmhand, plu
     farmhand.stream_files["pictures"].update(logos(12)[0])
     stream_control.ask()
     assert stream_control.note().startswith("12 of Stream control's files") and len(stream_control.note()) < 300
+
+
+def test_tracks_from_the_plugins_own_folder_are_copied_from_there_never_fetched_back(api, farmhand, plugin):
+    """Stream control's music_from naming this plugin's own folder: Farmhand passes those tracks on from this plugin,
+    so fetching them was the plugin downloading its own music back from itself (20 s a track while streaming)."""
+    take_over(farmhand)
+    farmhand.stream_files["music"].update({"ours.mp3": b"ID3 ours, as Farmhand passes it on", "theirs.mp3": b"ID3 Twitch's"})
+    farmhand.music_from = {"ours.mp3": "stream", "theirs.mp3": "twitch"}  # (this plugin's id in Farmhand is "stream")
+    own = Path(plugin_media()) / "music"
+    own.mkdir(parents=True, exist_ok=True)
+    (own / "ours.mp3").write_bytes(b"ID3 ours, in the plugin's own folder")
+    stream_control.ask()
+    got = downloads(farmhand)
+    assert "/plugin-api/v1/stream/music/ours.mp3" not in got
+    assert "/plugin-api/v1/stream/music/theirs.mp3" in got and "/plugin-api/v1/stream/music/beat.mp3" in got
+    music = stream_control.cache() / "music"
+    assert (music / "ours.mp3").read_bytes() == b"ID3 ours, in the plugin's own folder"
+    assert (music / "theirs.mp3").read_bytes() == b"ID3 Twitch's"
+    assert stream_control.note() is None
+
+    farmhand.calls.clear()
+    stream_control.ask()  # all copied, stamps kept: nothing fetched or asked again
+    assert downloads(farmhand) == [] and "/plugin-api/v1/me" not in farmhand.calls
+
+    (own / "ours.mp3").unlink()  # gone from the plugin's own folder: fetched from Farmhand after all
+    (music / "ours.mp3").unlink()
+    stream_control.ask()
+    assert downloads(farmhand) == ["/plugin-api/v1/stream/music/ours.mp3"]
+
+
+def plugin_media() -> str:
+    from streamer import config
+
+    return str(config.settings.media_dir)
+
+
+def design_asks(farmhand) -> int:
+    return sum(1 for c in list(farmhand.calls) if c == "/plugin-api/v1/stream/design")
+
+
+def test_files_copy_in_a_worker_of_their_own_while_farmhand_is_still_asked(api, farmhand, plugin, monkeypatch):
+    """A copy round of dozens of tracks took a quarter of an hour, and the design was asked again only after it: a
+    "couldn't ask" stayed on the page all that while. Now asking goes on, and the page says how far the copying is."""
+    monkeypatch.setattr(stream_control, "EVERY", 0.05)
+    take_over(farmhand)
+    farmhand.stream_files["music"].update({f"track {i}.mp3": b"ID3 %d" % i for i in range(5)})
+    farmhand.file_delay = 0.3
+    farmhand.down = True
+    stream_control.start()
+    try:
+        assert wait_until(lambda: "Couldn't ask Farmhand" in (stream_control.note() or ""))
+        farmhand.down = False
+        assert wait_until(lambda: stream_control.design() is not None)  # (its picture copied: followed, music to come)
+        assert wait_until(lambda: "Copying Stream control's music:" in (stream_control.note() or ""))
+        said = stream_control.note()
+        assert "Couldn't ask" not in said and " of 6 tracks." in said
+        assert stream_control.problem() is None  # (copying is no problem: Farmhand's Stream control isn't told it)
+        asked = design_asks(farmhand)
+        assert wait_until(lambda: design_asks(farmhand) >= asked + 3, timeout=1)  # asked on while it copies
+        assert "Copying Stream control's music:" in (stream_control.note() or "")
+        assert wait_until(lambda: stream_control.note() is None, timeout=10)
+        assert sorted(p.name for p in (stream_control.cache() / "music").iterdir()) == sorted(farmhand.stream_files["music"])
+    finally:
+        stream_control.stop()
+
+
+def test_switching_stream_control_off_is_followed_at_once_while_files_copy(api, farmhand, plugin, monkeypatch):
+    monkeypatch.setattr(stream_control, "EVERY", 0.05)
+    take_over(farmhand)
+    farmhand.stream_files["music"].update({f"track {i}.mp3": b"ID3 %d" % i for i in range(20)})
+    farmhand.file_delay = 0.3  # (6 s of music)
+    stream_control.start()
+    try:
+        assert wait_until(lambda: "Copying Stream control's music:" in (stream_control.note() or ""))
+        farmhand.design = None  # switched off (or this plugin unticked) in Stream control
+        assert wait_until(lambda: stream_control.design() is None, timeout=1)
+        assert wait_until(lambda: stream_control.note() is None, timeout=2)  # (the copying given up)
+    finally:
+        stream_control.stop()
 
 
 # ------------------------------------------------------------------ while live
