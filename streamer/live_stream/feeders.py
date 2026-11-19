@@ -296,6 +296,8 @@ class Feeder:
                 print(f"stream: camera {self.key} read on the processor: the NVIDIA card couldn't unpack it "
                       f"({heard[-1] if heard else ''})", flush=True)
                 continue
+            if self.raw and not self.on_card:
+                self.on_card = True  # (its reading on the processor ended: the card is tried again first, next time)
             self.restarts += 1
             wait = RETRY_FIRST if got else min(RETRY_MOST, wait * 2 if self.restarts > 1 else wait)
             self._stopped.wait(wait)

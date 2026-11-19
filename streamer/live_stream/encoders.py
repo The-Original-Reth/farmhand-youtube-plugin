@@ -16,9 +16,17 @@ ENCODERS = {
 }
 
 # FARMHAND_STREAM_ENCODER: "auto" (the default: an NVIDIA card's encoder when one works here, else the processor),
-# "nvenc" or "cpu" to say which. What "auto" finds is remembered until Farmhand starts again.
+# "nvenc" or "cpu" to say which. What "auto" finds is remembered until the picture fails (encoder(fresh=True): asked
+# again, so a card that won't open another session is left for the processor, and one that will again is used again).
 ENCODER_SETTING = "FARMHAND_STREAM_ENCODER"
 _found_encoder: dict[str, str] = {}
+# What ffmpeg says when the card won't compress (no session free, the card or its driver gone)
+NVENC_TROUBLE = ("nvenc", "openencodesession", "no capable devices", "cuda", "nvidia", "incompatible client key")
+
+
+def nvenc_trouble(said) -> bool:
+    """Whether these lines from a picture ffmpeg say the NVIDIA card wouldn't compress it."""
+    return any(w in (line or "").lower() for line in said for w in NVENC_TROUBLE)
 
 
 def encoder_args(encoder: str) -> list[str]:
@@ -48,11 +56,12 @@ def _nvenc_works(ffmpeg: str) -> bool:
         return False
 
 
-def encoder(ffmpeg: str) -> str:
-    """"nvenc" or "cpu": how the stream is compressed (see FARMHAND_STREAM_ENCODER)."""
+def encoder(ffmpeg: str, fresh: bool = False) -> str:
+    """"nvenc" or "cpu": how the stream is compressed (see FARMHAND_STREAM_ENCODER). `fresh`: the card tried again
+    rather than what was found before."""
     wanted = (os.environ.get(ENCODER_SETTING) or "auto").strip().lower()
     if wanted in ("cpu", "nvenc"):
         return wanted
-    if ffmpeg not in _found_encoder:
+    if fresh or ffmpeg not in _found_encoder:
         _found_encoder[ffmpeg] = "nvenc" if _nvenc_works(ffmpeg) else "cpu"
     return _found_encoder[ffmpeg]

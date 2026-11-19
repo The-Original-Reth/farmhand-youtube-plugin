@@ -48,6 +48,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
     def __init__(self):
         self._lock = threading.Lock()
         self._encoder: str | None = None
+        self._encoder_note: str | None = None  # why the stream is compressed on the processor after the card failed it
         self._decoding: tuple[str, str | None] | None = None  # where the cameras are unpacked, and why not the card
         self._run_started: float | None = None  # when the picture ffmpeg going out started (monotonic)
         self._wanted = threading.Event()
@@ -102,6 +103,8 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
                 "error": self._error,
                 "title": dict(self._title) if self._title else None,
                 "encoder": self._encoder,  # "nvenc" (an NVIDIA card) or "cpu", while live; None otherwise
+                # why it's compressed on the processor though the card was used before (it wouldn't take it again), or None
+                "encoder_note": self._encoder_note if wanted else None,
                 # where the cameras are unpacked and fitted, while live: "gpu" (the NVIDIA card) or "cpu"; None otherwise
                 "camera_decoding": self._decoding[0] if self._decoding and wanted else None,
                 # why not on the NVIDIA card (it was tried and didn't work), or None
@@ -225,13 +228,17 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         fed = self._feed(ffmpeg, srcs, size, cams[0])
         feeders.wait_for_shapes(fed, feeders.SHAPE_WAIT)  # (raw cameras: their pipes made for the size they come at)
         enc = encoder(ffmpeg)
-        folder, files, make = layout_picture.prepare(db, chosen, ffmpeg, url, srcs, fed, enc, resolution, cache)
+        # (each picture is compressed the way the stream is then: the card may be left for the processor, or back)
+        folder, files, make = layout_picture.prepare(db, chosen, ffmpeg, url, srcs, fed, lambda: self._encoder or enc,
+                                                     resolution, cache)
 
         with self._lock:
             gen = self._generation
             self._picture += 1
             picture = self._picture
             self._encoder = enc
+            if enc == "nvenc":
+                self._encoder_note = None
             self._decoding = cams
             self._labels = [s.label for s in srcs]
             self._showing = [(s.key, s.label) for s in srcs]
@@ -409,6 +416,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
             folder, self._dir = self._dir, None
             self._started_at = None
             self._encoder = None
+            self._encoder_note = None
             self._decoding = None
             self._resolution = None
             self._run_started = None

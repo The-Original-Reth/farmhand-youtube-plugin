@@ -141,6 +141,11 @@ export function LiveStatusPanel({ status, destLabel, destination, busy, onStart,
                 ? "The stream is off: ffmpeg isn't running on the server. Set everything up as usual, and turn it on above to go live."
                 : `Farmhand sends the grid below to ${destLabel(destination)} itself, no OBS needed.`}
         </div>
+        {status.live && status.encoderNote && (
+          <div data-testid="stream-encoder-note" style={uiText(12, c.amber, { marginTop: 6, lineHeight: 1.5 })}>
+            {status.encoderNote}
+          </div>
+        )}
         {status.live && status.cameraDecodingNote && (
           <div data-testid="stream-camera-decoding" style={uiText(12, c.textMuted, { marginTop: 6, lineHeight: 1.5 })}>
             The cameras are read on the processor: {status.cameraDecodingNote}.
