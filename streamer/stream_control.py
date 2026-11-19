@@ -83,24 +83,22 @@ def media_folder() -> Path | None:
     return cache() if design() is not None else None
 
 
+def _said(*keys: str) -> str | None:
+    """The lines of _state under `keys` that say something, in that order, as one (None: none do)."""
+    with _lock:
+        said = [_state[k] for k in keys if _state[k]]
+    return " ".join(said) or None
+
+
 def note() -> str | None:
     """What the page says about it, in a line or a few (None: all well), how far the copying has got included."""
-    with _lock:
-        said = [_state[k] for k in ("asking", "files", "note", "copying") if _state[k]]
-    return " ".join(said) or None
+    return _said("asking", "files", "note", "copying")
 
 
 def problem() -> str | None:
     """What's wrong, if anything (note() without the copying's progress, which is no problem): what Farmhand's Stream
     control is told while live (routes.control_status)."""
-    with _lock:
-        said = [_state[k] for k in ("asking", "files", "note") if _state[k]]
-    return " ".join(said) or None
-
-
-def _noted(text: str | None) -> None:
-    with _lock:
-        _state["note"] = text
+    return _said("asking", "files", "note")
 
 
 def _set(**values) -> None:
@@ -209,7 +207,7 @@ def _pictures_arrived() -> None:
         try:
             _restart_if_live(store())
         except ValueError as e:  # (the stream carries on as it was)
-            _noted(f"Stream control's pictures couldn't be put on the stream: {e}")
+            _set(note=f"Stream control's pictures couldn't be put on the stream: {e}")
 
 
 def _done_asking() -> None:
@@ -247,7 +245,7 @@ def _follow(new: dict | None, why: str | None, pictures_copied: bool = False) ->
                 if pictures_copied and after["enabled"] and all(before[k] == after[k] for k in PICTURE):
                     _restart_if_live(db)  # (the same layout, a picture in it replaced)
             except ValueError as e:  # (the stream carries on as it was)
-                _noted(f"Stream control's design couldn't be put on the stream: {e}")
+                _set(note=f"Stream control's design couldn't be put on the stream: {e}")
         return True
 
 
