@@ -179,7 +179,11 @@ version, held with `apt-mark hold`), and the container is given the card and the
 (`libnvidia-ptxjitcompiler.so.1` is what lets the cameras be fitted on the card; without it they're read on the
 processor, and the page says so.) `FARMHAND_STREAM_ENCODER` (`auto`, `nvenc` or `cpu`) says where the stream is
 compressed and `FARMHAND_STREAM_CAMERAS` (`auto` or `cpu`) where the cameras are unpacked; `auto` (the default) tries
-the card.
+the card. The card is shared with anything else given it (another plugin, a test box, an AI model), so it isn't
+trusted from Go live on: whenever the picture fails, the card is tried again. One that won't open another session (or
+is gone) leaves the stream to be compressed on the processor from the next picture on, and the page and Farmhand's
+Stream control say so; once it takes it again, the next picture is back on the card. A camera that left the card tries
+it again the next time it's read, and where the cameras are unpacked is tried again at the next Go live or new layout.
 
 On a Proxmox LXC container, with the NVIDIA driver already on the host, share the card into the container first: add
 to `/etc/pve/lxc/<id>.conf` on the host, then restart the container (`ls -l /dev/nvidia*` on the host shows the numbers

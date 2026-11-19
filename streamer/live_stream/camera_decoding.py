@@ -76,3 +76,8 @@ def decoding(ffmpeg: str) -> tuple[str, str | None]:
         _found[ffmpeg] = (GPU, None) if works else (CPU, why)
         print(f"stream: cameras unpacked on the {'NVIDIA card' if works else 'processor'}" + (f": {why}" if why else ""), flush=True)
     return _found[ffmpeg]
+
+
+def forget(ffmpeg: str) -> None:
+    """What the card's test found is forgotten (the stream failed): the next Go live or new layout tries it again."""
+    _found.pop(ffmpeg, None)

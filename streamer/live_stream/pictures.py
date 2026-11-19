@@ -9,7 +9,7 @@ import shutil
 import threading
 import time
 
-from . import procs
+from . import camera_decoding, encoders, procs
 from .constants import RETRY_SECONDS
 from .picture import TURNS_FOR
 
@@ -25,6 +25,34 @@ RESHAPE_EVERY = 20
 
 class PicturesMixin:
     """Each layout's picture ffmpeg, and the hand-over between them (state on runner.Stream)."""
+
+    def _recheck_card(self) -> None:
+        """The picture failed: the NVIDIA card is tried again rather than trusted from Go live. One that won't open
+        another session (or is gone) leaves the stream to be compressed on the processor from the next picture on (the
+        page says why); one that takes it again is used again. Where the cameras are unpacked is tried again at the next
+        Go live or new layout (each camera's feeder already leaves the card on its own when the card fails it)."""
+        ffmpeg = procs.ffmpeg_path()
+        if not ffmpeg:
+            return
+        camera_decoding.forget(ffmpeg)
+        with self._lock:
+            was, said = self._encoder, list(self._said)
+        if was is None:
+            return
+        now = encoders.encoder(ffmpeg, fresh=True)
+        with self._lock:
+            if self._encoder is None:  # (stopped meanwhile)
+                return
+            self._encoder = now
+            if now == "cpu" and was == "nvenc":
+                why = "said it had no session free, or isn't in reach" if encoders.nvenc_trouble(said) else "didn't work when tried again"
+                self._encoder_note = (f"The NVIDIA card wouldn't compress the stream (it {why}), so it's compressed on the "
+                                      "processor until the card takes it again.")
+            elif now == "nvenc":
+                self._encoder_note = None
+        if now != was:
+            print(f"stream: compressing on the {'NVIDIA card' if now == 'nvenc' else 'processor'} from the next picture "
+                  f"(tried again after the picture failed)", flush=True)
 
     def _start_picture(self, gen: int, picture: int, make, handover: bool, folder: str | None = None):
         """A picture ffmpeg for this layout, started and going out: handed over to from the one going out when `handover`
@@ -108,6 +136,7 @@ class PicturesMixin:
                             return
                         with self._lock:
                             self._error = f"The new layout's picture didn't start. Trying again in {RETRY_SECONDS} s."
+                        self._recheck_card()
                         if not self._wait(gen, RETRY_SECONDS, picture):
                             return
                         continue
@@ -143,6 +172,7 @@ class PicturesMixin:
                 with self._lock:
                     last = next((l for l in reversed(self._said) if l), None)
                     self._error = f"The picture stopped (ffmpeg exit {code}): {last or 'no reason given'}. Trying again in {RETRY_SECONDS} s."
+                self._recheck_card()
                 if not self._wait(gen, RETRY_SECONDS, picture):
                     return
         finally:

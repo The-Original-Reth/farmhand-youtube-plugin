@@ -32,11 +32,11 @@ def down_squares(chosen: dict, srcs: list[Source], fed: list[Feeder] | None = No
     return [looks(s, bool(f and f.raw)) for s, f in zip(srcs, fed or [None] * len(srcs))]
 
 
-def prepare(db: Store, chosen: dict, ffmpeg: str, url: str, srcs: list[Source], fed: list[Feeder], enc: str,
+def prepare(db: Store, chosen: dict, ffmpeg: str, url: str, srcs: list[Source], fed: list[Feeder], enc,
             resolution: str | None, cache: str | None):
     """The layout's picture made ready: (its folder, its words' files (None: no words on the cameras), make). Its own
     folder, so the old layout's keeps going until it's handed over; slideshow screens already put together this time
-    live (`cache`) are reused."""
+    live (`cache`) are reused. `enc`: how it's compressed (encoders.py), or a function saying so as each picture starts."""
     downs = down_squares(chosen, srcs, fed)
     folder = tempfile.mkdtemp(prefix="farmhand-stream-")
     files = [os.path.join(folder, f"{i}.txt") for i in range(len(srcs))] if chosen["show_status"] else None
@@ -58,7 +58,7 @@ def prepare(db: Store, chosen: dict, ffmpeg: str, url: str, srcs: list[Source], 
         pump = Pump(list(zip(fed, downs)), paths)
         piped = [Source(s.printer_id, s.label, pump.input_args(i), [], key=s.key, name=s.name) for i, s in enumerate(srcs)]
         return command(ffmpeg, piped, url, Look(
-            encoder=enc, clock=clock, status_files=files, cycle=cycle, turns_file=turns_file, resolution=resolution,
+            encoder=enc() if callable(enc) else enc, clock=clock, status_files=files, cycle=cycle, turns_file=turns_file, resolution=resolution,
             border_color=chosen["border_color"], background=chosen["background"], font=chosen["font"], color=chosen["color"],
             cols=chosen["cols"], rows=chosen["rows"], cells=cells, music=True, relay_offset=offset, lists_dir=folder,
         )), pump
