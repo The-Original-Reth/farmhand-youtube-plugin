@@ -113,6 +113,30 @@ class PicturesMixin:
             procs.end(old)  # the one it took over from
         return proc
 
+    def _going_out(self, gen: int, picture: int, make, folder: str, proc, started: float):
+        """The picture `proc` going out (since `started`): until it stops, or the layout is handed over from; handed over
+        to a new picture of its own when a raw camera's frames turn out a size its pipe wasn't made for (see
+        RESHAPE_SETTLE). (the picture going out at the end, when it started), or None when the layout was handed over
+        from while a reshape settled."""
+        reshaped = 0.0
+        while self._current(gen, picture) and proc.poll() is None:
+            time.sleep(0.5)
+            with self._lock:
+                pump = self._pumps.get(proc)
+            if pump is None or not pump.stale() or time.monotonic() - reshaped < RESHAPE_EVERY:
+                continue
+            reshaped = time.monotonic()
+            if not self._wait(gen, RESHAPE_SETTLE, picture):
+                return None
+            print("stream: a camera's size isn't what its pipe was made for: handing over to a picture made for it", flush=True)
+            try:
+                new = self._start_picture(gen, picture, make, True, folder)
+            except OSError:
+                new = None
+            if new is not None:
+                proc, started = new, time.monotonic()
+        return proc, started
+
     def _keep_picture(self, gen: int, picture: int, make, folder: str, handover: bool, keys: set[str]) -> None:
         """This layout's picture, for as long as it's the layout and the stream is live: after settling (a newer layout
         within SETTLE seconds takes its place), handed over to from the one going out, or started straight away. Its
@@ -144,25 +168,10 @@ class PicturesMixin:
                     if not dropping:
                         dropping = True
                         threading.Thread(target=self._drop_feeders, args=(gen, picture, keys), name="stream-feeders", daemon=True).start()
-                # going out: until it stops, or the layout is handed over from; handed over to a new picture of its own
-                # when a raw camera's frames turn out a size its pipe wasn't made for
-                reshaped = 0.0
-                while self._current(gen, picture) and proc.poll() is None:
-                    time.sleep(0.5)
-                    with self._lock:
-                        pump = self._pumps.get(proc)
-                    if pump is None or not pump.stale() or time.monotonic() - reshaped < RESHAPE_EVERY:
-                        continue
-                    reshaped = time.monotonic()
-                    if not self._wait(gen, RESHAPE_SETTLE, picture):
-                        return
-                    print("stream: a camera's size isn't what its pipe was made for: handing over to a picture made for it", flush=True)
-                    try:
-                        new = self._start_picture(gen, picture, make, True, folder)
-                    except OSError:
-                        new = None
-                    if new is not None:
-                        proc, started = new, time.monotonic()
+                going = self._going_out(gen, picture, make, folder, proc, started)
+                if going is None:
+                    return
+                proc, started = going
                 if not self._current(gen, picture):
                     return
                 code = proc.wait()
