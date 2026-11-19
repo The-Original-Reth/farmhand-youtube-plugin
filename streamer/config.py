@@ -22,6 +22,8 @@ The rest are this plugin's own:
                              is never sent anything, signed in or not
     FARMHAND_STREAM_ENCODER  auto (the default: an NVIDIA card's encoder when one works, else the processor),
                              nvenc or cpu
+    FARMHAND_STREAM_CAMERAS  auto (the default: the cameras unpacked and fitted on an NVIDIA card when it works, else
+                             on the processor) or cpu (live_stream/camera_decoding.py)
 """
 from __future__ import annotations
 

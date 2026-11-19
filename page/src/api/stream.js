@@ -56,6 +56,10 @@ const normalizeStream = (s) => ({
     error: s.status.error,
     title: s.status.title || null,
     encoder: s.status.encoder || null,
+    // where the cameras are unpacked and fitted, while live: "gpu" (the NVIDIA card) or "cpu"; and why not the card
+    // (it was tried and didn't work), or null
+    cameraDecoding: s.status.camera_decoding || null,
+    cameraDecodingNote: s.status.camera_decoding_note || null,
     // the size going out, set when it went live (a new one saved while live waits for the next Go live); null otherwise
     resolution: s.status.resolution || null,
     // what the self-check last did this time live (next to no video reaching YouTube): { at, message }, or null

@@ -16,6 +16,11 @@ from .picture import TURNS_FOR
 HANDOVER_WAIT = 30  # seconds a new layout's picture ffmpeg has to start going before the old one is kept on instead
 SETTLE = 3  # seconds a new layout waits before its picture ffmpeg starts: a burst of saves becomes one hand-over
 WARMING_NICE = 10  # a picture ffmpeg warming up runs at this lower priority, so the one going out keeps the processor
+# A raw camera whose frames turned out a size other than its pipe's (pump.Pump.stale: its shape learnt only once it came
+# up, or changed): after RESHAPE_SETTLE seconds (others coming up meanwhile are taken along), the picture is handed over
+# to one made for the sizes now, no more often than every RESHAPE_EVERY seconds
+RESHAPE_SETTLE = 2
+RESHAPE_EVERY = 20
 
 
 class PicturesMixin:
@@ -40,6 +45,10 @@ class PicturesMixin:
             pump.stop()
             raise
         pump.watch(proc)
+        with self._lock:
+            self._pumps[proc] = pump  # (its pipes' sizes: see _keep_picture)
+            for p in [p for p in self._pumps if p.poll() is not None]:
+                del self._pumps[p]
         threading.Thread(target=self._listen, args=(proc,), name="stream-listen", daemon=True).start()
         if player:
             player.attach(proc.stdin)
@@ -106,9 +115,25 @@ class PicturesMixin:
                     if not dropping:
                         dropping = True
                         threading.Thread(target=self._drop_feeders, args=(gen, picture, keys), name="stream-feeders", daemon=True).start()
-                # going out: until it stops, or the layout is handed over from
+                # going out: until it stops, or the layout is handed over from; handed over to a new picture of its own
+                # when a raw camera's frames turn out a size its pipe wasn't made for
+                reshaped = 0.0
                 while self._current(gen, picture) and proc.poll() is None:
                     time.sleep(0.5)
+                    with self._lock:
+                        pump = self._pumps.get(proc)
+                    if pump is None or not pump.stale() or time.monotonic() - reshaped < RESHAPE_EVERY:
+                        continue
+                    reshaped = time.monotonic()
+                    if not self._wait(gen, RESHAPE_SETTLE, picture):
+                        return
+                    print("stream: a camera's size isn't what its pipe was made for: handing over to a picture made for it", flush=True)
+                    try:
+                        new = self._start_picture(gen, picture, make, True, folder)
+                    except OSError:
+                        new = None
+                    if new is not None:
+                        proc, started = new, time.monotonic()
                 if not self._current(gen, picture):
                     return
                 code = proc.wait()

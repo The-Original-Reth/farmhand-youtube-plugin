@@ -2,7 +2,8 @@
 A Pump per picture ffmpeg: for each camera square, a named pipe the picture ffmpeg reads as an image2pipe input, written
 at a steady FPS with the camera's next picture (feeders.Feeder.next_after), or its "Camera down" frame (down_square.py)
 when it has sent nothing for feeders.DOWN_AFTER seconds. The picture's inputs never end or stall, so it never has to be
-started again for a camera.
+started again for a camera. A camera unpacked on an NVIDIA card (feeders.py) has its pipe written with raw frames, all
+its `box`'s size, its "Camera down" frame too.
 """
 from __future__ import annotations
 
@@ -10,10 +11,14 @@ import os
 import threading
 import time
 
+from . import raw_frames
 from .constants import FPS
 from .down_square import DownFrames
 from .feeders import Feeder
 from .pacing import pace
+
+PIPE_SIZE = 1 << 20  # bytes a raw camera's pipe holds (Linux's own most for a pipe), so a frame goes in a write or two
+F_SETPIPE_SZ = 1031  # (Linux's fcntl, not named in Python's fcntl module before 3.10 on every build)
 
 
 def make_fifo(path: str) -> None:
@@ -30,25 +35,45 @@ def pipe_input(path: str) -> list[str]:
     return ["-f", "image2pipe", "-framerate", str(FPS), "-analyzeduration", str(PROBE), "-c:v", "mjpeg", "-i", path]
 
 
+def _bigger_pipe(f) -> None:
+    try:
+        import fcntl
+        fcntl.fcntl(f.fileno(), F_SETPIPE_SZ, PIPE_SIZE)
+    except (ImportError, OSError, ValueError, AttributeError):
+        pass  # (not Linux, or not allowed: the usual size does, with more writes)
+
+
 class Pump:
     """
     One picture ffmpeg's camera inputs: a pipe per camera square, each written at a steady FPS by its own thread with the
     camera's latest frame or its "Camera down" frame. Started before the picture ffmpeg (each writer waits for it to
-    open its pipe) and ended when it ends (watch()).
+    open its pipe) and ended when it ends (watch()). A raw camera's pipe is made for the size its frames are when the
+    pump is made (`sizes`); a frame of another size (its camera's shape only now known, or changed) can't go in it, so
+    the "Camera down" square does, and stale() says so, for the picture to be handed over to one made for it.
     """
 
     def __init__(self, cameras: list[tuple[Feeder, DownFrames]], paths: list[str]):
         self._cameras = cameras
         self.paths = paths
+        self.sizes = [feeder.box if feeder.raw else None for feeder, _ in cameras]
         self._stopped = threading.Event()
         self._files: list = []
         self._lock = threading.Lock()
 
+    def input_args(self, i: int) -> list[str]:
+        """How the picture ffmpeg reads camera i's pipe: raw frames of the size it was made for, or JPEGs."""
+        size = self.sizes[i]
+        return raw_frames.input_args(self.paths[i], size) if size else pipe_input(self.paths[i])
+
+    def stale(self) -> bool:
+        """Whether a raw camera's frames are now a size other than its pipe was made for."""
+        return any(size and feeder.box_known and feeder.box != size for (feeder, _), size in zip(self._cameras, self.sizes))
+
     def start(self) -> "Pump":
         for path in self.paths:
             make_fifo(path)
-        for (feeder, downs), path in zip(self._cameras, self.paths):
-            threading.Thread(target=self._write, args=(feeder, downs, path), name="stream-pump", daemon=True).start()
+        for (feeder, downs), path, size in zip(self._cameras, self.paths, self.sizes):
+            threading.Thread(target=self._write, args=(feeder, downs, path, size), name="stream-pump", daemon=True).start()
         return self
 
     def watch(self, proc) -> None:
@@ -78,17 +103,22 @@ class Pump:
             except OSError:
                 pass
 
-    def frame_for(self, feeder: Feeder, downs: DownFrames, last: int | None = None) -> tuple[bytes, int | None]:
+    def frame_for(self, feeder: Feeder, downs: DownFrames, last: int | None = None,
+                  size: tuple[int, int] | None = None) -> tuple[bytes, int | None]:
         """What a writer that wrote picture `last` writes next: the camera's next picture, or its "Camera down" frame;
-        and the number to pass next time."""
-        frame, number, size = feeder.next_after(last)
-        return (frame if frame is not None else downs.at(size or feeder.guess)), number
+        and the number to pass next time. `size`: a raw camera's pipe's (a frame of another size can't go in it)."""
+        frame, number, frame_size = feeder.next_after(last)
+        if frame is not None and (size is None or len(frame) == raw_frames.frame_bytes(size)):
+            return frame, number
+        return downs.at(size if size else frame_size or feeder.guess), number
 
-    def _write(self, feeder: Feeder, downs: DownFrames, path: str) -> None:
+    def _write(self, feeder: Feeder, downs: DownFrames, path: str, size: tuple[int, int] | None = None) -> None:
         try:
             f = open(path, "wb", buffering=0)
         except OSError:
             return
+        if size:
+            _bigger_pipe(f)
         with self._lock:
             if self._stopped.is_set():
                 f.close()
@@ -98,7 +128,7 @@ class Pump:
         due, written, last = time.monotonic(), 0, None
         try:
             while not self._stopped.is_set():
-                frame, last = self.frame_for(feeder, downs, last)
+                frame, last = self.frame_for(feeder, downs, last, size)
                 f.write(frame)
                 due, written = due + step, written + 1
                 due = pace(due, written, step, time.monotonic())

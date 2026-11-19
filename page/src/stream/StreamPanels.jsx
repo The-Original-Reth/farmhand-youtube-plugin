@@ -111,7 +111,13 @@ export function MuteSwitch({ muted, onMute }) {
 // On air or not, and the button that changes it. `destLabel(key)`: a destination's name; `destination`: the one chosen;
 // `off`: the switch at the top is off, so there's no going live until it's on.
 export function LiveStatusPanel({ status, destLabel, destination, busy, onStart, onStop, off = false }) {
-  const on = status.encoder === "nvenc" ? " · on the NVIDIA card" : status.encoder === "cpu" ? " · on the processor" : "";
+  // where the cameras are unpacked (cameraDecoding) and the stream compressed (encoder): the NVIDIA card or the processor
+  const cams = status.cameraDecoding;
+  const on = status.encoder === "nvenc"
+    ? cams === "cpu" ? " · compressed on the NVIDIA card, cameras on the processor" : cams === "gpu" ? " · cameras and compressing on the NVIDIA card" : " · on the NVIDIA card"
+    : status.encoder === "cpu"
+      ? cams === "gpu" ? " · cameras on the NVIDIA card, compressed on the processor" : " · on the processor"
+      : "";
   return (
     <div data-testid="stream-status" style={panelBox({ padding: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" })}>
       <Radio size={20} color={status.live ? (status.error ? c.amber : c.green) : c.textFaint} />
@@ -135,6 +141,11 @@ export function LiveStatusPanel({ status, destLabel, destination, busy, onStart,
                 ? "The stream is off: ffmpeg isn't running on the server. Set everything up as usual, and turn it on above to go live."
                 : `Farmhand sends the grid below to ${destLabel(destination)} itself, no OBS needed.`}
         </div>
+        {status.live && status.cameraDecodingNote && (
+          <div data-testid="stream-camera-decoding" style={uiText(12, c.textMuted, { marginTop: 6, lineHeight: 1.5 })}>
+            The cameras are read on the processor: {status.cameraDecodingNote}.
+          </div>
+        )}
         {status.live && status.youtube && <YouTubeLiveLine yt={status.youtube} />}
         {status.live && status.selfCheck && (
           <div data-testid="stream-self-check" style={uiText(12, c.amber, { marginTop: 6, lineHeight: 1.5 })}>

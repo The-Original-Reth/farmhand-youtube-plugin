@@ -153,8 +153,12 @@ line) changes that line to `https://github.com/The-Original-Reth/farmhand-youtub
 
 ### An NVIDIA card
 
-ffmpeg compresses the stream on an NVIDIA card (NVENC) when the container can reach it, leaving the processor to read
-the cameras and lay out the grid; otherwise it uses the processor (the page says which while live). The machine needs
+ffmpeg compresses the stream on an NVIDIA card (NVENC) when the container can reach it, and unpacks and fits each
+camera's video on it too (NVDEC and CUDA's scaler), handing the cameras to the picture as raw frames, so the processor
+only lays out the grid; otherwise it uses the processor (the page says which while live, and why the cameras aren't
+on the card when it tried and couldn't). A camera the card can't unpack is read on the processor on its own. The
+cameras don't count against the card's limit on streams compressed at once (NVENC sessions; 8 on a GeForce card with
+driver 550 or later): each Stream plugin uses one, two for a moment while a new layout takes over. The machine needs
 the NVIDIA driver's user-space libraries matching the driver in use (on an LXC container under Proxmox, the host's:
 e.g. `libnvidia-encode-580`, `nvidia-utils-580`, `libnvidia-compute-580` and `libnvidia-decode-580` at the host's
 version, held with `apt-mark hold`), and the container is given the card and the libraries ffmpeg loads:
@@ -169,9 +173,13 @@ version, held with `apt-mark hold`), and the container is given the card and the
       - /usr/lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1:ro
       - /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-encode.so.1:ro
       - /usr/lib/x86_64-linux-gnu/libnvcuvid.so.1:/usr/lib/x86_64-linux-gnu/libnvcuvid.so.1:ro
+      - /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1:ro
 ```
 
-`FARMHAND_STREAM_ENCODER` (`auto`, `nvenc` or `cpu`) says which to use; `auto` (the default) tries the card.
+(`libnvidia-ptxjitcompiler.so.1` is what lets the cameras be fitted on the card; without it they're read on the
+processor, and the page says so.) `FARMHAND_STREAM_ENCODER` (`auto`, `nvenc` or `cpu`) says where the stream is
+compressed and `FARMHAND_STREAM_CAMERAS` (`auto` or `cpu`) where the cameras are unpacked; `auto` (the default) tries
+the card.
 
 On a Proxmox LXC container, with the NVIDIA driver already on the host, share the card into the container first: add
 to `/etc/pve/lxc/<id>.conf` on the host, then restart the container (`ls -l /dev/nvidia*` on the host shows the numbers
@@ -243,6 +251,7 @@ save a few seconds with `ffmpeg -i rtsp://192.168.10.215:8554/live/farmtest -t 1
 | `STREAM_CLIPS_SHOWN_AS` | Optional: the clips folder as people reach it over the network, shown on the page |
 | `STREAM_TEST_DESTINATION` | Optional: an `rtmp://` address the stream goes to instead of YouTube |
 | `FARMHAND_STREAM_ENCODER` | `auto` (default), `nvenc` or `cpu` |
+| `FARMHAND_STREAM_CAMERAS` | `auto` (default: unpacked and fitted on an NVIDIA card when it works) or `cpu` |
 
 ## Developing
 
