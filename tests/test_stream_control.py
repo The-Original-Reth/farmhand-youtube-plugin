@@ -228,6 +228,49 @@ def test_while_live_the_stream_follows_a_new_revision_and_goes_back_to_its_own(a
     assert store.store().get("live_wanted") is None
 
 
+def test_while_live_pictures_copied_late_start_the_picture_again(api, ffmpeg, farmhand, plugin, monkeypatch):
+    """A slideshow whose pictures couldn't all be copied when the design was put on the stream showed its colour until
+    the stream was next started: now the picture starts again once they're copied, or one is replaced."""
+    monkeypatch.setattr(stream_control, "_sleep", lambda s: None)
+    grid(api, [{"camera": "1:Bed"}, None])
+    assert api.post("/api/stream-control/start").json()["live"] is True
+    assert wait_until(lambda: len(ffmpeg.commands) == 1)
+
+    show = [{"camera": "2:Camera"}, {"background": "#1F3A5F", "image": None, "slideshow": "Prints", "text": ""}]
+    take_over(farmhand, cells=show)
+    frog = farmhand.stream_files["slideshows"]["Prints"].pop("frog.png")  # not in Stream control's folder yet: 404
+    stream_control.ask()
+    assert wait_until(lambda: len(ffmpeg.commands) == 2)
+    assert stream_control.note().startswith("1 of Stream control's files couldn't be copied")
+
+    stream_control.ask()  # still not there: nothing new, nothing started again
+    assert len(ffmpeg.commands) == 2
+
+    farmhand.stream_files["slideshows"]["Prints"]["frog.png"] = frog  # there now: copied, and the picture follows
+    stream_control.ask()
+    assert wait_until(lambda: len(ffmpeg.commands) == 3) and stream_control.note() is None
+    assert len(ffmpeg.senders) == 1  # (a hand-over: no break on YouTube)
+
+    stream_control.ask()  # all copied: nothing more
+    assert len(ffmpeg.commands) == 3
+
+    farmhand.stream_files["slideshows"]["Prints"]["frog.png"] = png("#0000FF")  # replaced, with only the words new
+    farmhand.design = design(revision=2, cells=show, title="New words")
+    stream_control.ask()
+    assert wait_until(lambda: len(ffmpeg.commands) == 4)
+
+
+def test_pictures_copied_while_not_live_start_nothing(api, ffmpeg, farmhand, plugin, monkeypatch):
+    monkeypatch.setattr(stream_control, "_sleep", lambda s: None)
+    take_over(farmhand, cells=[{"camera": "2:Camera"}, {"background": "#1F3A5F", "image": None, "slideshow": "Prints", "text": ""}])
+    frog = farmhand.stream_files["slideshows"]["Prints"].pop("frog.png")
+    stream_control.ask()
+    farmhand.stream_files["slideshows"]["Prints"]["frog.png"] = frog
+    stream_control.ask()
+    assert (stream_control.cache() / "slideshows" / "Prints" / "frog.png").is_file()
+    assert ffmpeg.commands == [] and stream.status()["live"] is False
+
+
 # ------------------------------------------------------------------ Farmhand's Go live and Stop
 
 

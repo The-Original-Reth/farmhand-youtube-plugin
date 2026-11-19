@@ -110,9 +110,31 @@ def ask() -> bool:
         return _follow(None, None)
     new = answer["design"]
     old = design()
-    problems = _fetch(new, answer.get("media") if isinstance(answer.get("media"), dict) else {},
-                      again=old is None or old.get("revision") != new.get("revision"))
-    return _follow(new, "; ".join(problems) or None)
+    problems, arrived = _fetch(new, answer.get("media") if isinstance(answer.get("media"), dict) else {},
+                               again=old is None or old.get("revision") != new.get("revision"))
+    changed = _follow(new, "; ".join(problems) or None, pictures_copied=arrived)
+    if arrived and not changed:
+        _pictures_arrived()
+    return changed
+
+
+def _pictures_arrived() -> None:
+    """Pictures the design shows were copied after it was put on the stream (they couldn't all be copied in time, or
+    one was replaced in Stream control's folder): while live, the picture starts again with them, as it does when a
+    picture on the page changes (a hand-over, no break). Without this a slideshow copied late stays its plain colour
+    until the stream is next started."""
+    from . import live_stream
+
+    if not live_stream.stream.status()["live"]:
+        return
+    from .routes import _restart_if_live
+
+    stream_media.forget()
+    print("stream: Stream control's pictures copied; the picture starts again with them", flush=True)
+    try:
+        _restart_if_live(store())
+    except ValueError as e:  # (the stream carries on as it was)
+        _noted(f"Stream control's pictures couldn't be put on the stream: {e}")
 
 
 def _done_asking() -> None:
@@ -121,8 +143,9 @@ def _done_asking() -> None:
     _asked.set()
 
 
-def _follow(new: dict | None, why: str | None) -> bool:
-    """Send `new` (None: the plugin's own layout) from now on; while live, the stream changes as a saved change does."""
+def _follow(new: dict | None, why: str | None, pictures_copied: bool = False) -> bool:
+    """Send `new` (None: the plugin's own layout) from now on; while live, the stream changes as a saved change does
+    (and starts its picture again when `pictures_copied`, pictures it shows newly copied, even with the layout as it was)."""
     from . import live_stream
 
     db = store()
@@ -138,10 +161,13 @@ def _follow(new: dict | None, why: str | None) -> bool:
     print(f"stream: {'following Stream control (revision ' + str(new.get('revision')) + ')' if new else 'sending its own layout'}", flush=True)
     stream_media.forget()
     if live_stream.stream.status()["live"]:
-        from .routes import apply_change
+        from .routes import PICTURE, _restart_if_live, apply_change
 
+        after = live_stream.settings(db)
         try:
-            apply_change(db, before, live_stream.settings(db))
+            apply_change(db, before, after)
+            if pictures_copied and after["enabled"] and all(before[k] == after[k] for k in PICTURE):
+                _restart_if_live(db)  # (the same layout, a picture in it replaced)
         except ValueError as e:  # (the stream carries on as it was)
             _noted(f"Stream control's design couldn't be put on the stream: {e}")
     return True
@@ -214,12 +240,14 @@ def _failed(failures: list[tuple[str, str]]) -> str | None:
     return f"{n} of Stream control's files couldn't be copied from Farmhand: {first}{more}."
 
 
-def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
+def _fetch(design_: dict, media: dict, again: bool) -> tuple[list[str], bool]:
     """The files the design names, into the cache: its pictures, its slideshows' pictures in their order, and the music.
     A file is fetched only when it isn't copied yet or Farmhand's stamp for it (media.stamps, its size and time) has
     changed since it was; the stamps copied are kept in the cache (STAMPS_FILE). (A Farmhand that sends no stamps:
     pictures fetched again on a new revision, music once.) Farmhand asking to slow down (429) is waited out. Files it
-    no longer names are removed. What went wrong, in a line or two (a square without its picture shows its colour)."""
+    no longer names are removed. What went wrong, in a line or two (a square without its picture shows its colour),
+    and whether a picture or slideshow screen was copied or a slideshow's order changed (the music aside, which the
+    stream picks up as it plays)."""
     root = cache()
     images_dir, shows_dir, music_dir = root / stream_media.IMAGES, root / stream_media.SLIDESHOWS, root / stream_media.MUSIC
     for d in (images_dir, shows_dir, music_dir):
@@ -229,12 +257,15 @@ def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
     copied = _read_stamps(root)
     wanted: set[str] = set()
     failures: list[tuple[str, str]] = []
+    arrived = False
     q = lambda s: urllib.parse.quote(s, safe="")  # noqa: E731
 
     def get(rel: str, path: str, target: Path, refetch: bool) -> None:
+        nonlocal arrived
         wanted.add(rel)
         stamp = stamps.get(rel) if stamps is not None else None
-        if target.is_file():
+        had = target.is_file()
+        if had:
             if stamps is None and not refetch:
                 return
             if stamp is not None and copied.get(rel) == stamp:
@@ -250,6 +281,8 @@ def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
                 copied.pop(rel, None)
                 failures.append((target.name, e.message))
                 return
+        if not rel.startswith(f"{stream_media.MUSIC}/") and (not had or stamp is not None):  # (not one fetched again only
+            arrived = True                                                                # because Farmhand sends no stamps)
         if stamp is not None:
             copied[rel] = stamp
         else:
@@ -270,7 +303,12 @@ def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
         for name in order:
             if not stream_media.is_blank(name):
                 get(f"{stream_media.SLIDESHOWS}/{show}/{name}", f"/stream/slideshows/{q(show)}/pictures/{q(name)}", d / name, again)
-        (d / stream_media.ORDER_FILE).write_text(json.dumps(order, ensure_ascii=False), encoding="utf-8")
+        order_file, order_text = d / stream_media.ORDER_FILE, json.dumps(order, ensure_ascii=False)
+        try:
+            arrived = arrived or order_file.read_text(encoding="utf-8") != order_text
+        except OSError:
+            arrived = True
+        order_file.write_text(order_text, encoding="utf-8")
         _keep_only(d, {n for n in order if not stream_media.is_blank(n)})
     _keep_only(shows_dir, shows, dirs=True)
 
@@ -286,7 +324,7 @@ def _fetch(design_: dict, media: dict, again: bool) -> list[str]:
     problems = [p for p in (_failed(failures),) if p]
     if isinstance(media.get("error"), str) and media["error"]:
         problems.insert(0, f"Stream control's folder: {media['error']}")
-    return problems
+    return problems, arrived
 
 
 # ------------------------------------------------------------------ while the plugin runs
