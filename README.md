@@ -162,8 +162,12 @@ container**, with Stream chosen (a copy in Farmhand's `frontend/src/plugins/comp
 ```bash
 sudo mkdir -p /opt/farmhand-stream && cd /opt/farmhand-stream
 sudo curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/docker-compose.yml
+sudo curl -fsSLo update.sh https://raw.githubusercontent.com/The-Original-Reth/farmhand-youtube-plugin/main/update.sh
 sudo docker compose up -d --build
 ```
+
+Update it later with `sudo sh update.sh` in that folder: it builds the new version while the stream keeps going, then
+swaps the container, trying again until the new one is up (INSTALL.md, "Updating").
 
 Then set where it saves on Farmhand's Settings page (see [Where it saves](#where-it-saves)); a machine set up before
 the plugin had its own save location adds the mount permissions to its compose file first (INSTALL.md, "Updating").
