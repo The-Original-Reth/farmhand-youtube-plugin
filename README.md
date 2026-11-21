@@ -16,6 +16,9 @@ resolution, the delay, saved layouts, YouTube sign-in and broadcasts, or a paste
 
 What it adds over the Stream page older Farmhands had built in:
 
+- **Text over a camera.** A camera's square can carry pieces of text (Add text in its square's editor, or in
+  Farmhand's Stream control), each dragged into place with its own size, font, colour and dark band. They're drawn
+  over the camera whenever it's on the stream, in the grid or on its own turn.
 - **Each camera is read on its own.** A camera that stops shows **Camera down** with the printer's name, in the
   square's background colour and the chosen font and colour, and goes back to live video by itself; the other cameras
   and the connection to YouTube carry on. Going live with a camera off works, and the page lists each camera as live

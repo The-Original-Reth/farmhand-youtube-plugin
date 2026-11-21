@@ -8,6 +8,7 @@ import os
 
 from .constants import DEFAULT_TEXT_COLOR
 from .fonts import font_file
+from .squares import _text_box
 
 # The words on a camera shown on its own, taking turns: written on the camera's own picture before it's enlarged, so
 # sized to it (28 px on the 720-high stream, whatever the camera's size)
@@ -50,3 +51,26 @@ def status_line(label: str, p: dict) -> str:
     if p.get("error"):
         return f"{label} · Status unknown"
     return f"{label} · Idle"
+
+
+def placed_words(layer: dict, w: int | None = None, h: int | None = None, font: str | None = None, color: str | None = None,
+                 least: int = 10, band_least: int = 4) -> str:
+    """
+    The drawtext of a piece of text written over a camera (staging.staged_layers' {"words": its file, "box", "font",
+    "color", "band"}): centred on its box's spot, its height a part of the picture's, each line centred as the page shows
+    it, on a dark band when chosen. `w`, `h`: the square's size in px (at least `least` px high, the band's border at
+    least `band_least`); None: the camera's own picture, as ffmpeg sizes it (a camera on its own, taking turns, before
+    it's enlarged). `font`, `color`: the stream's, unless the text has its own.
+    """
+    tb = _text_box(layer.get("box"))
+    if w is None or h is None:
+        size, spacing = f"h*{tb['size']}", ""
+        x, y, border = f"w*{tb['x']}-text_w/2", f"h*{tb['y']}-text_h/2", f"h*{tb['size'] / 5:.4f}"
+    else:
+        big = round(tb["size"] * h)
+        size, spacing = max(least, big), f":line_spacing={big // 4}"
+        x, y, border = f"{round(tb['x'] * w)}-text_w/2", f"{round(tb['y'] * h)}-text_h/2", max(band_least, big // 5)
+    band = f":box=1:boxcolor=black@0.5:boxborderw={border}" if layer.get("band") else ""
+    return (f"drawtext=fontfile={filter_path(font_file(layer.get('font') or font))}:textfile={filter_path(layer['words'])}:reload=1:expansion=none"
+            f":fontsize={size}:fontcolor=0x{(layer.get('color') or color or DEFAULT_TEXT_COLOR).lstrip('#')}{spacing}"
+            f":text_align=C:x={x}:y={y}{band}")

@@ -70,7 +70,7 @@ def local_copies(pictures: dict, folder: str) -> dict:
 
 def squares(db: Store, chosen: dict, folder: str, cache: str | None = None) -> list:
     """The grid's squares as the ffmpeg command takes them (picture.Look.cells): ("camera", its place among the
-    cameras, its cell), ("card", its cell with its pictures' copies, its words' file and its slideshow pictures' own
+    cameras, its cell, with its pieces of text's files as "text_layers" when it has any), ("card", its cell with its pictures' copies, its words' file and its slideshow pictures' own
     words' files), or None."""
     cards = {c: cell for c, cell in enumerate(chosen["cells"]) if cell and "camera" not in cell}
     pictures = local_copies(card_pictures(db, cards), folder)
@@ -81,7 +81,9 @@ def squares(db: Store, chosen: dict, folder: str, cache: str | None = None) -> l
         if not cell:
             out.append(None)
         elif "camera" in cell:
-            out.append(("camera", place[cell["camera"]], cell))
+            # its pieces of text over it, as files (an empty one is left out)
+            texts = staged_layers(db, [x for x in cell.get("layers") or [] if x.get("type") == "text"], folder, f"camera-{c}", copied)
+            out.append(("camera", place[cell["camera"]], {**cell, "text_layers": texts} if texts else cell))
         else:
             words = None
             if cell.get("text"):
