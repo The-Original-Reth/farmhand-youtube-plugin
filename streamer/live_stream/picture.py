@@ -17,7 +17,7 @@ from .choices import auto_grid
 from .encoders import compress_args
 from .frame import Frame
 from .sources import Source
-from .words import camera_words, filter_path, full_words
+from .words import camera_words, filter_path, full_words, placed_words
 
 TURNS_FOR = 24 * 3600  # the timetable of turns covers a day; ffmpeg then ends and is started again at once
 
@@ -153,7 +153,7 @@ def command(ffmpeg: str, srcs: list[Source], url: str, look: Look | None = None)
     if need_grid:
         for c, cell in enumerate(cells):
             if cell and cell[0] == "camera":
-                parts.append(_camera_square(c, cell[1], own.get(cell[1], stream_words), frame, look.status_files))
+                parts.append(_camera_square(c, cell[1], own.get(cell[1], stream_words), frame, look.status_files, look.font, look.color))
             elif cell and cell[0] == "card":
                 parts.append(card_square(c, cell[1], frame, picture, clock=look.clock, font=look.font, color=look.color, slideshow=slideshow))
             else:
@@ -161,7 +161,7 @@ def command(ffmpeg: str, srcs: list[Source], url: str, look: Look | None = None)
         parts.append(_laid_out(len(cells), cols, frame))
     video = "[grid]"
     if cycle is not None:
-        parts += _turns(n, need_grid, frame, look.status_files, lambda i: own.get(i, stream_words))
+        parts += _turns(n, need_grid, frame, look.status_files, lambda i: own.get(i, stream_words), look.font, look.color)
         video = "[turns]"
     if look.turns_file:  # the timetable moves the switches of taking turns
         parts.append(f"{video}sendcmd=f={filter_path(look.turns_file)}[timed]")
@@ -203,10 +203,12 @@ def _cameras_own(cells: list, look: Look) -> dict[int, dict]:
     return {i: {**stream_words, **{k: v for k, v in mine.items() if v is not None}} for i, mine in own.items()}
 
 
-def _camera_square(c: int, i: int, mine: dict, frame: Frame, status_files: list[str] | None) -> str:
+def _camera_square(c: int, i: int, mine: dict, frame: Frame, status_files: list[str] | None,
+                   font: str | None = None, color: str | None = None) -> str:
     """Square c, camera i (from [g{i}]): fitted inside its border (so the border never covers its top and bottom, or
     its sides), its own colour round it, its words along its foot (sized to its square, 20 px in a quarter of a 720p
-    picture, unless it has its own size), its border."""
+    picture, unless it has its own size), its pieces of text over it (mine["text_layers"], placed on the square as a
+    card's are; `font`, `color`: the stream's, unless a piece has its own), its border."""
     tw, th, edge = frame.tw, frame.th, frame.edge
     colour = (mine.get("background") or "#" + frame.back).lstrip("#")
     iw, ih = (tw - 2 * edge) // 2 * 2, (th - 2 * edge) // 2 * 2
@@ -218,6 +220,7 @@ def _camera_square(c: int, i: int, mine: dict, frame: Frame, status_files: list[
         else:
             small = max(frame.px(11), min(th // 18, tw // 32))
             chain.append(camera_words(status_files[i], small, small * 2 // 3 + edge, frame.px(6), small // 2 + edge, mine))
+    chain += [placed_words(layer, tw, th, font, color, frame.px(10), frame.px(4)) for layer in mine.get("text_layers") or []]
     return f"[g{i}]{','.join(chain)},{frame.border}[c{c}]"
 
 
@@ -230,16 +233,19 @@ def _laid_out(count: int, cols: int, frame: Frame) -> str:
     return f"{tiles}xstack=inputs={count}:layout={layout}:fill=0x{frame.back},{frame.full_size}[grid]"
 
 
-def _turns(n: int, need_grid: bool, frame: Frame, status_files: list[str] | None, own_of) -> list[str]:
-    """Taking turns: each camera (from [s{i}]) with its words written on its own picture, the switch that lets the one
-    whose turn it is through, enlarged ([full]), and the switch between it and the grid: [turns]."""
+def _turns(n: int, need_grid: bool, frame: Frame, status_files: list[str] | None, own_of,
+           font: str | None = None, color: str | None = None) -> list[str]:
+    """Taking turns: each camera (from [s{i}]) with its words and its pieces of text written on its own picture, the
+    switch that lets the one whose turn it is through, enlarged ([full]), and the switch between it and the grid: [turns]."""
     parts, picked = [], ""
     for i in range(n):
         mine = own_of(i)
-        if not status_files or not mine.get("show_words", True):
+        steps = [camera_words(status_files[i], **full_words(mine), own=mine)] if status_files and mine.get("show_words", True) else []
+        steps += [placed_words(layer, font=font, color=color) for layer in mine.get("text_layers") or []]
+        if not steps:
             picked += f"[s{i}]"
             continue
-        parts.append(f"[s{i}]{camera_words(status_files[i], **full_words(mine), own=mine)}[w{i}]")
+        parts.append(f"[s{i}]{','.join(steps)}[w{i}]")
         picked += f"[w{i}]"
     parts.append(f"{picked}streamselect@pick=inputs={n}:map=0,{frame.full_size}[full]")
     parts.append("[grid][full]streamselect@view=inputs=2:map=0[turns]" if need_grid else "[full]null[turns]")

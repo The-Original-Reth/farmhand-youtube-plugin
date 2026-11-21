@@ -325,3 +325,27 @@ def test_each_line_of_a_screens_words_is_centred_as_the_page_shows_it():
     first = [x for x, y in red if y < top + 0.05 * frame.th]  # the short first line
     middle = (min(first) + max(first)) / 2
     assert abs(middle - frame.tw / 2) < 0.02 * frame.tw  # centred, not over on the left
+
+
+def test_a_cameras_own_text_is_written_over_it(tmp_path):
+    from streamer.live_stream import staging
+    words = {"type": "text", "text": "Toys for kids", "box": {"x": 0.5, "y": 0.25, "size": 0.1}, "color": "#ff0000", "band": True}
+    kept = {"type": "text", "text": "Toys for kids", "box": {"x": 0.5, "y": 0.25, "size": 0.1}, "font": None, "color": "#FF0000", "band": True}
+    # kept on the square (a picture isn't something a camera takes)
+    assert live_stream._cell({"camera": "1:A", "layers": [words, {"type": "picture", "image": "a.png"}]}) == {"camera": "1:A", "layers": [kept]}
+    # going live writes each piece to a file (an empty one is left out)
+    chosen = {"cells": [{"camera": "1:A", "layers": [kept, {**kept, "text": "  "}]}, {"camera": "1:B"}], "cameras": ["1:A", "1:B"]}
+    cells = staging.squares(None, chosen, str(tmp_path))
+    texts = cells[0][2]["text_layers"]
+    assert len(texts) == 1 and open(texts[0]["words"], encoding="utf-8").read() == "Toys for kids"
+    assert "text_layers" not in cells[1][2]
+    # drawn over the camera in the grid (a tenth of its 720-high square, centred where placed) and on its own turn
+    srcs = [live_stream.Source(i, f"P{i}", ["-i", f"http://cam{i}"]) for i in range(2)]
+    look = live_stream.Look(cols=2, rows=1, cells=cells, resolution="720p", status_files=["/s/0.txt", "/s/1.txt"], cycle=(10, 5))
+    graph = _graph(live_stream.command("ffmpeg", srcs, "u", look))
+    tiles = {i: graph.split(f"[g{i}]scale")[1].split(f"[c{i}]")[0] for i in range(2)}
+    file = texts[0]["words"].replace("\\", "/").replace(":", "\:")
+    assert f"textfile={file}" in tiles[0] and "fontsize=72:fontcolor=0xFF0000:line_spacing=18:text_align=C:x=320-text_w/2:y=180-text_h/2" in tiles[0]
+    assert "box=1:boxcolor=black@0.5" in tiles[0] and "camera-" not in tiles[1]
+    own = graph.split("[s0]drawtext")[1].split("[w0]")[0]
+    assert f"textfile={file}" in own and "fontsize=h*0.1" in own and "x=w*0.5-text_w/2:y=h*0.25-text_h/2" in own
