@@ -17,6 +17,7 @@ from .picture import Look, command, timetable
 from .pump import Pump
 from .sources import Source
 from .staging import write_atomically
+from .words import words_shown
 
 
 def down_squares(chosen: dict, srcs: list[Source], fed: list[Feeder] | None = None) -> list[DownFrames]:
@@ -39,7 +40,9 @@ def prepare(db: Store, chosen: dict, ffmpeg: str, url: str, srcs: list[Source], 
     live (`cache`) are reused. `enc`: how it's compressed (encoders.py), or a function saying so as each picture starts."""
     downs = down_squares(chosen, srcs, fed)
     folder = tempfile.mkdtemp(prefix="farmhand-stream-")
-    files = [os.path.join(folder, f"{i}.txt") for i in range(len(srcs))] if chosen["show_status"] else None
+    # a file per camera when any camera has its printer's name and print on it (the stream's choice, or its own)
+    worded = chosen["show_status"] or any(c and "camera" in c and words_shown(c, chosen["show_status"]) for c in chosen["cells"])
+    files = [os.path.join(folder, f"{i}.txt") for i in range(len(srcs))] if worded else None
     for path, s in zip(files or [], srcs):
         write_atomically(path, s.label)
     cycle = (chosen["seconds_all"], chosen["seconds_each"]) if chosen["layout"] == "cycle" and len(srcs) > 1 else None

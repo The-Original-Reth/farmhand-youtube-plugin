@@ -6,7 +6,7 @@ import { useData } from "../data.jsx";
 import { usePhone } from "../lib/usePhone.js";
 import { usePrintProgress, usePrinterCameras } from "../monitor/cameras.js";
 import { StreamPreview } from "./StreamPreview.jsx";
-import { cameraOf, followCameras, printerOf } from "./shapes.js";
+import { cameraOf, followCameras, printerOf, wordsShown } from "./shapes.js";
 import { LiveStatusPanel, MuteSwitch, StreamSwitch, WhereToPanel } from "./StreamPanels.jsx";
 import { DefaultsPanel } from "./StreamSquares.jsx";
 import { STREAM_CHANNEL, YouTubeSettingsButton, openYouTubeSettings } from "./YouTubeSettings.jsx";
@@ -60,7 +60,9 @@ export function StreamSection({ layouts = [], onSaveLayouts, onSlideshowRenamed,
 
   const draftOrSaved = draft || page?.settings;
   const inGrid = (draftOrSaved?.cells || []).filter((x) => x?.camera).map((x) => x.camera);
-  const progress = usePrintProgress(draftOrSaved?.showStatus ? [...new Set(inGrid.map(printerOf))] : [], { keepErrors: true });
+  // the prints of the printers whose cameras have their name and print written on them
+  const worded = (draftOrSaved?.cells || []).filter((x) => x?.camera && wordsShown(x, draftOrSaved.showStatus)).map((x) => x.camera);
+  const progress = usePrintProgress([...new Set(worded.map(printerOf))], { keepErrors: true });
 
   useEffect(() => {
     let live = true;

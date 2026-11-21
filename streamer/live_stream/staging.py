@@ -17,6 +17,7 @@ from .constants import DEFAULT_TEXT_COLOR
 from .fonts import font_file
 from .frame import Frame
 from .squares import _text_box
+from .words import words_shown
 
 
 def write_atomically(path: str, text: str) -> None:
@@ -83,7 +84,9 @@ def squares(db: Store, chosen: dict, folder: str, cache: str | None = None) -> l
         elif "camera" in cell:
             # its pieces of text over it, as files (an empty one is left out)
             texts = staged_layers(db, [x for x in cell.get("layers") or [] if x.get("type") == "text"], folder, f"camera-{c}", copied)
-            out.append(("camera", place[cell["camera"]], {**cell, "text_layers": texts} if texts else cell))
+            # its printer's name and print: its own tick, else the stream's
+            mine = {**cell, "show_words": words_shown(cell, chosen.get("show_status", True))}
+            out.append(("camera", place[cell["camera"]], {**mine, "text_layers": texts} if texts else mine))
         else:
             words = None
             if cell.get("text"):

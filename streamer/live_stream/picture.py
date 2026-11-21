@@ -216,10 +216,10 @@ def _camera_square(c: int, i: int, mine: dict, frame: Frame, status_files: list[
     if status_files and mine.get("show_words", True):
         if mine.get("words_size"):
             size = max(frame.px(8), round(mine["words_size"] * th))
-            chain.append(camera_words(status_files[i], size, size * 2 // 3 + edge, max(2, size // 3), size // 2 + edge, mine))
+            chain.append(camera_words(status_files[i], size, size * 2 // 3 + edge, max(2, size // 3), size // 2 + edge, mine, (tw, th)))
         else:
             small = max(frame.px(11), min(th // 18, tw // 32))
-            chain.append(camera_words(status_files[i], small, small * 2 // 3 + edge, frame.px(6), small // 2 + edge, mine))
+            chain.append(camera_words(status_files[i], small, small * 2 // 3 + edge, frame.px(6), small // 2 + edge, mine, (tw, th)))
     chain += [placed_words(layer, tw, th, font, color, frame.px(10), frame.px(4)) for layer in mine.get("text_layers") or []]
     return f"[g{i}]{','.join(chain)},{frame.border}[c{c}]"
 

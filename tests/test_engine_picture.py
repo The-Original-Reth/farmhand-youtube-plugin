@@ -184,7 +184,7 @@ def test_a_cards_words_in_the_font_chosen(monkeypatch, tmp_path):
 def test_a_camera_squares_own_words():
     assert live_stream._cell({"camera": "1:Bed", "show_words": False, "words_size": 0.9, "words_color": "#ff0000", "words_font": "lato"}) == {
         "camera": "1:Bed", "show_words": False, "words_size": 0.3, "words_color": "#FF0000", "words_font": "lato"}
-    assert live_stream._cell({"camera": "1:Bed", "show_words": True, "words_color": "#FFFFFF", "words_font": "nope"}) == {"camera": "1:Bed", "words_color": "#FFFFFF"}  # white chosen: kept, as the stream's may be another
+    assert live_stream._cell({"camera": "1:Bed", "show_words": True, "words_color": "#FFFFFF", "words_font": "nope"}) == {"camera": "1:Bed", "show_words": True, "words_color": "#FFFFFF"}  # ticked: kept (whatever the stream says); white chosen: kept, as the stream's may be another
     srcs = [live_stream.Source(i, f"P{i}", ["-i", f"http://cam{i}"]) for i in range(3)]
     cells = [("camera", 0, {"camera": "1:A", "show_words": False}),
              ("camera", 1, {"camera": "1:B", "words_size": 0.1, "words_color": "#FF0000"}), ("camera", 2)]
@@ -349,3 +349,24 @@ def test_a_cameras_own_text_is_written_over_it(tmp_path):
     assert "box=1:boxcolor=black@0.5" in tiles[0] and "camera-" not in tiles[1]
     own = graph.split("[s0]drawtext")[1].split("[w0]")[0]
     assert f"textfile={file}" in own and "fontsize=h*0.1" in own and "x=w*0.5-text_w/2:y=h*0.25-text_h/2" in own
+
+
+def test_a_camera_squares_words_go_where_its_square_puts_them():
+    from streamer.live_stream import words
+
+    placed = {"words_place": {"x": 0.25, "y": 0.5}}
+    # in the grid: their band's left edge and foot on the square (640x360 here)
+    assert ":x=160+6:y=180-th-6" in words.camera_words("0.txt", 20, 19, 6, 10, placed, (640, 360))
+    # on its own, taking turns: on the camera's own picture
+    assert ":x=w*0.25+h/120:y=h*0.5-th-h/120" in words.camera_words("0.txt", **words.FULL_WORDS, own=placed)
+    # none: low on the left, as before
+    assert ":x=10:y=h-th-19" in words.camera_words("0.txt", 20, 19, 6, 10, {}, (640, 360))
+    assert live_stream._cell({"camera": "1:Bed", "words_place": {"x": 3, "y": -1}})["words_place"] == {"x": 0.95, "y": 0.05}
+
+
+def test_a_camera_ticked_has_its_words_whatever_the_stream_says():
+    from streamer.live_stream.words import words_shown
+
+    assert words_shown({"camera": "1:Bed", "show_words": True}, False) is True
+    assert words_shown({"camera": "1:Bed", "show_words": False}, True) is False
+    assert words_shown({"camera": "1:Bed"}, False) is False and words_shown({"camera": "1:Bed"}, True) is True
