@@ -39,6 +39,7 @@ class Buffer:
         self._ended = False
         self._filler = None  # while filling: what the sender is given meanwhile (the holding screen's ffmpeg), or None
         self.sent = sent  # told each piece the sender has taken (what YouTube is given: kept for clips, clips.py), or None
+        self._writing_since: float | None = None  # while a piece is being handed to the sender: since when (monotonic)
         threading.Thread(target=self._feed, name="stream-buffer", daemon=True).start()
 
     def fill_from(self, proc) -> None:
@@ -147,6 +148,14 @@ class Buffer:
             self._sink = sink
             self._cond.notify_all()
 
+    def sender_stuck(self, seconds: float) -> bool:
+        """The sender has taken nothing for `seconds` while being handed a piece: it still runs, but its connection to
+        YouTube has stopped taking the video (a sender playing at real time takes what it's given steadily). How much is
+        held never shows it: it's trimmed back to about the delay meanwhile."""
+        with self._cond:
+            since = self._writing_since
+        return since is not None and time.monotonic() - since > seconds
+
     def close(self) -> None:
         with self._cond:
             self._ended = True
@@ -229,6 +238,8 @@ class Buffer:
     def _send(self, sink, data: bytes) -> bool:
         """`data` to the sender (blocking while the sender, reading at real time, has its pipe full). False when it has
         ended (it's started again, with set_sink)."""
+        with self._cond:
+            self._writing_since = time.monotonic()
         try:
             sink.write(data)
             sink.flush()
@@ -237,6 +248,9 @@ class Buffer:
                 if self._sink is sink:
                     self._sink = None
             return False
+        finally:
+            with self._cond:
+                self._writing_since = None
         if self.sent is not None:
             self.sent(data)
         return True

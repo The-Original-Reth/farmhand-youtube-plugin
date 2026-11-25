@@ -36,8 +36,8 @@ MUSIC = ("music", "music_volume", "music_shuffle")  # these the music follows wh
 
 
 def _restart_if_live(db: Store) -> None:
-    if live_stream.stream.status()["live"]:
-        live_stream.stream.go_live(db, session_factory)
+    """While live, the stream starts again with what's chosen now (a hand-over); stopped meanwhile, it stays stopped."""
+    live_stream.stream.restart_if_live(db, session_factory)
 
 
 @router.get("")
@@ -71,18 +71,28 @@ def apply_change(db: Store, before: dict, after: dict, new_key: bool = False) ->
     """What's sent changed from `before` to `after` (settings(): saved on the page, or Stream control's design switched
     to, from, or saved again): while live, the stream follows. Off: it stops; the picture: it starts again with it (a
     hand-over, no break); the music: it follows as it plays; the title, description or YouTube settings: set on the
-    broadcast. ValueError when the new picture can't go out (the stream carries on as it was)."""
-    live = live_stream.stream.status()["live"]
-    if live and not after["enabled"]:  # turned off: nothing streams
-        live_stream.stream.stop()
-    elif live and (any(before[k] != after[k] for k in PICTURE) or new_key):
-        _restart_if_live(db)
-    elif live and any(before[k] != after[k] for k in MUSIC):
-        live_stream.stream.music_settings(after)
-    elif (live and after["destination"] == "youtube"
-          and (before["title"], before["description"], before["youtube"]) != (after["title"], after["description"], after["youtube"])):
-        text_changed = (before["title"], before["description"]) != (after["title"], after["description"])
-        live_stream.stream.send_to_youtube(db, after, text_changed=text_changed)
+    broadcast. A change to several follows each of them (the YouTube settings even when the new picture couldn't go
+    out). ValueError when the new picture can't go out (the stream carries on as it was)."""
+    stream = live_stream.stream
+    status = stream.status()
+    if not status["live"]:
+        return
+    if not after["enabled"]:  # turned off: nothing streams
+        stream.stop()
+        return
+    youtube = (after["destination"] == "youtube"
+               and (before["title"], before["description"], before["youtube"]) != (after["title"], after["description"], after["youtube"]))
+    try:
+        if any(before[k] != after[k] for k in PICTURE) or new_key:
+            _restart_if_live(db)  # (the music follows in the hand-over too)
+        elif any(before[k] != after[k] for k in MUSIC):
+            stream.music_settings(after)
+    finally:
+        # (gone live afresh, to a new place or with a new key: its new broadcast was made from these settings already)
+        afresh = stream.status()["started_at"] != status["started_at"]
+        if youtube and not afresh:
+            text_changed = (before["title"], before["description"]) != (after["title"], after["description"])
+            stream.send_to_youtube(db, after, text_changed=text_changed)
 
 
 @router.post("/start")
@@ -352,9 +362,8 @@ def control_get():
 @control.post("/start")
 def control_start(db: Store = Depends(get_db)):
     """Go live (with Stream control's design while it takes over); live already: carries on as it is."""
-    if not live_stream.stream.status()["live"]:
-        with answer_errors():
-            live_stream.stream.go_live(db, session_factory)
+    with answer_errors():
+        live_stream.stream.start_unless_live(db, session_factory)
     return control_status()
 
 

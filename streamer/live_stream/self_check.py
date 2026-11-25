@@ -26,6 +26,10 @@ ENOUGH = 0.5
 TOP_UP_SHORT = 10
 TOP_UP_AFTER = 60
 TOP_UP_EVERY = 600
+# What the sender actually takes is looked at too: one that has taken nothing for SENDER_STUCK seconds while being handed
+# the stream still runs, but its connection to YouTube has stopped taking the video (a half-open connection: the
+# picture side looks fine, and the delay looks full). It's started again.
+SENDER_STUCK = 30
 
 
 class SelfCheckMixin:
@@ -41,6 +45,10 @@ class SelfCheckMixin:
         topped_up: float | None = None  # when it was last topped up
         while self._wait(gen, CHECK_EVERY):
             now = time.monotonic()
+            with self._lock:
+                buffer = self._buffer if self._current(gen) else None
+            if buffer is not None and buffer.sender_stuck(SENDER_STUCK):
+                self._restart_sender(gen, f"The connection to YouTube took nothing for {SENDER_STUCK} seconds")
             short = self._delay_short(gen)
             if short is None or short < TOP_UP_SHORT:
                 short_since = None

@@ -335,18 +335,20 @@ def _links(bid: str) -> dict:
     return {"id": bid, "watch_url": f"https://www.youtube.com/watch?v={bid}", "studio_url": f"https://studio.youtube.com/video/{bid}/livestreaming"}
 
 
-def live_on_stream(creds: dict, stream_id: str) -> dict | None:
+def live_on_stream(creds: dict, stream_id: str, skip: set[str] | frozenset = frozenset()) -> dict | None:
     """The channel's broadcast still live on Farmhand's own stream, {id, watch_url, studio_url}, or None. After the
     plugin's own restart (a new image, a reboot) the broadcast it was sending to is still live on YouTube, and goes on
     as soon as the video comes back: a new one made then would wait, "ready", for as long as the old one is live. Any
-    broadcast on the stream that never went live (one made like that before) is deleted, as it would never start."""
+    broadcast on the stream that never went live (one made like that before) is deleted, as it would never start.
+    Broadcasts in `skip` (ones Farmhand has ended, or is ending: YouTube may list them as live a little longer) are
+    left alone."""
     token = _access_token(creds)
     found = None
     for status in ("active", "upcoming"):
         items = _items(token, "/liveBroadcasts", {"part": "id,status,contentDetails", "broadcastStatus": status,
                                                   "broadcastType": "all", "maxResults": 25})
         for item in items:
-            if (item.get("contentDetails") or {}).get("boundStreamId") != stream_id:
+            if (item.get("contentDetails") or {}).get("boundStreamId") != stream_id or item.get("id") in skip:
                 continue
             if status == "active" and found is None:
                 found = _links(item["id"])
@@ -405,14 +407,23 @@ def end_broadcast(creds: dict, broadcast_id: str) -> None:
             pass
 
 
+def go_live(creds: dict, broadcast_id: str) -> None:
+    """Start a broadcast waiting "ready" while its stream already gets the video (its auto-start only starts it as the
+    video arrives). Its monitor stream is off, so it goes straight to live, with no testing first."""
+    token = _access_token(creds)
+    _api("POST", "/liveBroadcasts/transition", token, {"broadcastStatus": "live", "id": broadcast_id, "part": "status"})
+
+
 def health(creds: dict, stream_id: str, broadcast_id: str | None) -> dict:
     """What YouTube says now: {state: the broadcast's (created, ready, testing, live, complete...), health: good | ok |
-    bad | noData, issues: [YouTube's own warnings], viewers: watching now (None while not live)}."""
+    bad | noData, stream_status: the stream's (active while it gets the video, inactive, ready...), issues: [YouTube's
+    own warnings], viewers: watching now (None while not live)}."""
     token = _access_token(creds)
-    out = {"state": None, "health": None, "issues": [], "viewers": None}
+    out = {"state": None, "health": None, "stream_status": None, "issues": [], "viewers": None}
     streams = _items(token, "/liveStreams", {"part": "status", "id": stream_id})
     if streams:
         h = (streams[0].get("status") or {}).get("healthStatus") or {}
+        out["stream_status"] = (streams[0].get("status") or {}).get("streamStatus")
         out["health"] = h.get("status")
         out["issues"] = [i.get("description") or i.get("reason") or i.get("type") for i in h.get("configurationIssues") or []
                          if (i.get("severity") or "") in ("error", "warning")][:5]
