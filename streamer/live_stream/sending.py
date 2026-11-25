@@ -22,10 +22,8 @@ class SendingMixin:
         while self._current(gen):
             try:
                 proc = procs.popen(args, feed=True)
-            except OSError as e:
-                with self._lock:
-                    self._error = f"ffmpeg couldn't be started: {e.strerror or e}"
-                    self._wanted.clear()
+            except OSError as e:  # everything of this time live stopped, not left running with nothing going out
+                self._sender_failed(gen, f"ffmpeg couldn't be started, so the stream stopped: {e.strerror or e}")
                 return
             with self._lock:
                 if not self._current(gen):

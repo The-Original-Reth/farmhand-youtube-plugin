@@ -34,6 +34,7 @@ from .buffer import Buffer
 from .relay import Relay
 from .sources import sources
 from .picture import sender_command
+from .self_check import SENDER_STUCK
 
 LIVE_KEY = "live_wanted"  # in the plugin's store while the stream is meant to be live: it goes live again after a restart
 RESUME_EVERY = 30  # seconds between tries at going live again after a restart, while it can't yet
@@ -47,6 +48,10 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
 
     def __init__(self):
         self._lock = threading.Lock()
+        # going live and stopping, one at a time (in the order asked): two at once made two broadcasts (one left
+        # orphaned on YouTube), and a Stop pressed while going live was lost (the stream went live anyway)
+        self._control = threading.RLock()
+        self._stops = 0  # one more for every Stop asked for: going live under way gives up when it moves on
         self._encoder: str | None = None
         self._encoder_note: str | None = None  # why the stream is compressed on the processor after the card failed it
         self._decoding: tuple[str, str | None] | None = None  # where the cameras are unpacked, and why not the card
@@ -88,7 +93,8 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         with self._lock:
             proc, sender, buffer = self._proc, self._sender, self._buffer
             wanted = self._wanted.is_set()
-            on_air = bool(proc is not None and proc.poll() is None and sender is not None and sender.poll() is None)
+            on_air = bool(proc is not None and proc.poll() is None and sender is not None and sender.poll() is None
+                          and not (buffer and buffer.sender_stuck(SENDER_STUCK)))
             return {
                 "live": wanted,
                 "on_air": on_air and wanted,
@@ -188,7 +194,35 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
     def go_live(self, db: Store, session_factory, resumed: bool = False) -> dict:
         """Go live with what's chosen now; while live already (to the same place), hand over to it with no break in what
         YouTube gets. `resumed`: going live again after the plugin's own restart (the holding screen goes out while the
-        delay fills, so the broadcast never goes without video). ValueError says why it can't."""
+        delay fills, so the broadcast never goes without video). ValueError says why it can't. One at a time with Stop:
+        a Stop asked for meanwhile wins (this gives up, ValueError, and what it started is stopped)."""
+        return self._under_control(lambda: True, db, session_factory, resumed)
+
+    def restart_if_live(self, db: Store, session_factory) -> dict | None:
+        """While live: go_live again with what's chosen now (a hand-over to it); not live (stopped meanwhile): nothing."""
+        return self._under_control(self._wanted.is_set, db, session_factory)
+
+    def start_unless_live(self, db: Store, session_factory) -> dict | None:
+        """Not live: go_live; live already: carries on as it is (nothing)."""
+        return self._under_control(lambda: not self._wanted.is_set(), db, session_factory)
+
+    def _under_control(self, still, db: Store, session_factory, resumed: bool = False) -> dict | None:
+        with self._lock:
+            asked = self._stops
+        with self._control:
+            self._not_stopped(asked)
+            if not still():
+                return None
+            return self._go_live(db, session_factory, resumed, asked)
+
+    def _not_stopped(self, asked: int) -> None:
+        """ValueError when a Stop has been asked for since `asked`: going live under way gives up."""
+        with self._lock:
+            stopped = self._stops != asked
+        if stopped:
+            raise ValueError("Stop was pressed while going live, so the stream stopped.")
+
+    def _go_live(self, db: Store, session_factory, resumed: bool, asked: int) -> dict:
         chosen = settings(db)
         if not chosen["enabled"]:
             raise ValueError("The stream is turned off: turn it on at the top of the Stream page first.")
@@ -210,27 +244,39 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
             key = own["key"]
         url = f"{test}/{key}" if test else (own["url"] if own else where["url"]) + key
         with self._lock:
-            sender = self._sender
-            handover = self._wanted.is_set() and self._url == url and sender is not None and sender.poll() is None
+            # live to the same place: a hand-over, even while the sender is between tries at connecting again (its own
+            # loop connects again; starting afresh then ended the broadcast, and the delay with no holding screen)
+            handover = self._wanted.is_set() and self._url == url and self._buffer is not None
         if not handover:
             self._start_session(db, session_factory, chosen, ffmpeg, url, key, creds if own else None, own, resumed=resumed)
         elif self._player:
             self.music_settings(chosen)
 
+        try:
+            self._not_stopped(asked)
+            # each camera's feeder: the ones already reading it carry on (a new layout never connects to a camera again)
+            with self._lock:
+                resolution, cache = self._resolution, self._cache  # (this time live's, whatever is saved now)
+            size = RESOLUTIONS.get(resolution or DEFAULT_RESOLUTION, RESOLUTIONS[DEFAULT_RESOLUTION])[:2]
+            cams = decoding(ffmpeg)
+            fed = self._feed(ffmpeg, srcs, size, cams[0])
+            feeders.wait_for_shapes(fed, feeders.SHAPE_WAIT)  # (raw cameras: their pipes made for the size they come at)
+            enc = encoder(ffmpeg)
+            # (each picture is compressed the way the stream is then: the card may be left for the processor, or back)
+            folder, files, make = layout_picture.prepare(db, chosen, ffmpeg, url, srcs, fed, lambda: self._encoder or enc,
+                                                         resolution, cache)
+            self._not_stopped(asked)
+        except BaseException:
+            if not handover:  # started afresh with no picture to send: undone (a hand-over leaves the picture as it was)
+                # (going live again after a restart leaves the broadcast live on YouTube and LIVE_KEY kept, so the next
+                # try carries on with it; a Go live that didn't work ends the broadcast it made)
+                with self._lock:
+                    stopping = self._stops != asked  # (Stop pressed: its broadcast is ended, resumed or not)
+                self._stop_now(end_broadcast=stopping or not resumed)
+            raise
+
         db.put(LIVE_KEY, "1")  # (gone live: again by itself after a restart, until Stop)
         db.commit()
-
-        # each camera's feeder: the ones already reading it carry on (a new layout never connects to a camera again)
-        with self._lock:
-            resolution, cache = self._resolution, self._cache  # (this time live's, whatever is saved now)
-        size = RESOLUTIONS.get(resolution or DEFAULT_RESOLUTION, RESOLUTIONS[DEFAULT_RESOLUTION])[:2]
-        cams = decoding(ffmpeg)
-        fed = self._feed(ffmpeg, srcs, size, cams[0])
-        feeders.wait_for_shapes(fed, feeders.SHAPE_WAIT)  # (raw cameras: their pipes made for the size they come at)
-        enc = encoder(ffmpeg)
-        # (each picture is compressed the way the stream is then: the card may be left for the processor, or back)
-        folder, files, make = layout_picture.prepare(db, chosen, ffmpeg, url, srcs, fed, lambda: self._encoder or enc,
-                                                     resolution, cache)
 
         with self._lock:
             gen = self._generation
@@ -257,12 +303,15 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         """After the plugin's own restart: live again by itself when it was live (LIVE_KEY), trying every RESUME_EVERY
         seconds while it can't yet, until it is, or Stop is pressed."""
         def run():
-            while db.get(LIVE_KEY) and not self._wanted.is_set():
+            still = lambda: bool(db.get(LIVE_KEY)) and not self._wanted.is_set()  # noqa: E731 - (Stop pressed meanwhile: no)
+            while still():
                 try:
-                    self.go_live(db, session_factory, resumed=True)
-                    print("stream: live again after a restart, as it was before", flush=True)
+                    if self._under_control(still, db, session_factory, resumed=True) is not None:
+                        print("stream: live again after a restart, as it was before", flush=True)
                     return
                 except Exception as e:  # noqa: BLE001 - said on the page, and tried again
+                    if not db.get(LIVE_KEY):  # (Stop pressed meanwhile: nothing to try again)
+                        return
                     with self._lock:
                         self._error = f"Going live again after a restart didn't work yet ({e}). Trying again in {RESUME_EVERY} s."
                     print(f"stream: {self._error}", flush=True)
@@ -277,7 +326,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         from the YouTube settings; it starts by itself when the stream arrives); then the sender (the connection to
         YouTube), the delay's buffer and the music. With a pasted key instead, YouTube makes the broadcast itself and
         Farmhand can't set its title."""
-        self.stop(forget=False)
+        self._stop_now()
         broadcast = Broadcast.start(creds, own, chosen) if own else None
         wants_title = not own and chosen["destination"] == "youtube" and (chosen["title"] or chosen["description"])
 
@@ -305,7 +354,7 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
             self._player = player
             self._title = None
             if broadcast:
-                self._title = Broadcast.made_message(chosen)
+                self._title = broadcast.made_message(chosen)
             elif wants_title:
                 self._title = {"state": "failed", "message": "Sign in to YouTube (YouTube settings) for Farmhand to set the title and description."}
             self._broadcast = broadcast
@@ -321,7 +370,8 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
                     return settings(s)
 
             threading.Thread(target=broadcast.watch, name="stream-youtube", daemon=True, args=(
-                buffer.delay, lambda seconds: self._wait(gen, seconds), read_settings, lambda said: self._said_by_youtube(gen, said))).start()
+                buffer.delay, lambda seconds: self._wait(gen, seconds), read_settings, lambda said: self._said_by_youtube(gen, said),
+                lambda why: self._restart_sender(gen, why))).start()
 
     def _hold(self, db: Store, chosen: dict, ffmpeg: str, buffer: Buffer, player) -> None:
         """After the plugin's own restart: the holding screen to YouTube straight away, while the delay fills again
@@ -397,12 +447,20 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
 
     def stop(self, forget: bool = True, end_broadcast: bool = True) -> dict:
         """Stop the stream. `forget`: Stop pressed (it won't go live again after a restart); False when the plugin is
-        only shutting down, or going live afresh. `end_broadcast`: end the broadcast on YouTube too; False when the
-        plugin is only shutting down (a new image, a reboot): it carries on with that broadcast when it's back."""
-        if forget:
-            s = store()
-            s.put(LIVE_KEY, None)
-            s.commit()
+        only shutting down. `end_broadcast`: end the broadcast on YouTube too; False when the plugin is only shutting
+        down (a new image, a reboot): it carries on with that broadcast when it's back. Going live under way gives up
+        first (and is undone), so Stop always wins."""
+        with self._lock:
+            self._stops += 1
+        with self._control:
+            if forget:
+                s = store()
+                s.put(LIVE_KEY, None)
+                s.commit()
+            return self._stop_now(end_broadcast)
+
+    def _stop_now(self, end_broadcast: bool = True) -> dict:
+        """Everything of this time live ended (called holding self._control)."""
         with self._lock:
             self._wanted.clear()
             self._generation += 1
@@ -445,6 +503,31 @@ class Stream(CamerasMixin, PicturesMixin, SendingMixin, SelfCheckMixin):
         if folder:
             shutil.rmtree(folder, ignore_errors=True)
         return self.status()
+
+    def _restart_sender(self, gen: int, why: str) -> None:
+        """The connection to YouTube started again (its own loop connects again), while still this time live; `why`
+        said on the page as what the self-check did."""
+        with self._lock:
+            if not self._current(gen):
+                return
+            sender = self._sender
+            self._healed = {"at": datetime.now(timezone.utc).isoformat(), "message": f"{why}, so the connection to YouTube was started again."}
+        print(f"stream: {why}: the connection to YouTube is started again", flush=True)
+        procs.end(sender)
+
+    def _sender_failed(self, gen: int, message: str) -> None:
+        """The sender couldn't be started at all: everything of this time live is stopped (not left running with
+        nothing going to YouTube), as if Stop were pressed, and `message` said on the page."""
+        with self._control:
+            with self._lock:
+                if not self._current(gen):
+                    return
+            s = store()
+            s.put(LIVE_KEY, None)
+            s.commit()
+            self._stop_now()
+            with self._lock:
+                self._error = message
 
     def send_to_youtube(self, db: Store, chosen: dict, text_changed: bool = True, asked: bool = False) -> None:
         """The YouTube settings (`chosen`) saved while live: onto Farmhand's own broadcast, all of them; live on a pasted

@@ -20,6 +20,7 @@ from .sources import Source
 from .words import camera_words, filter_path, full_words, placed_words
 
 TURNS_FOR = 24 * 3600  # the timetable of turns covers a day; ffmpeg then ends and is started again at once
+SENDER_IO_TIMEOUT = 20  # seconds the sender waits on a connection to YouTube that has stopped taking the video
 
 
 def grid(n: int, width: int = WIDTH, height: int = HEIGHT) -> tuple[int, int, int, int]:
@@ -183,8 +184,10 @@ def sender_command(ffmpeg: str, url: str) -> list[str]:
     buffer is taken from the front at the pace it plays) and sent to `url` as it is (-c copy: no work of its own)."""
     # (-dts_delta_threshold 0.2: a jump of over a fifth of a second in the times, where a picture ffmpeg stalled or was started
     # again, is taken as a break and closed up, so the buffer plays straight on instead of waiting out the jump)
+    # (-rw_timeout: a connection that stops taking the video without closing, half open, ends the sender after
+    # SENDER_IO_TIMEOUT seconds, so its loop connects again; before, it waited on it for ever)
     return [ffmpeg, "-hide_banner", "-loglevel", "warning", "-re", "-dts_delta_threshold", "0.2", "-f", "mpegts", "-i", "pipe:0",
-            "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-f", "flv", url]
+            "-map", "0", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-rw_timeout", str(SENDER_IO_TIMEOUT * 1_000_000), "-f", "flv", url]
 
 
 def _stream_words(look: Look) -> dict:
